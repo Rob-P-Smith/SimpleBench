@@ -58,8 +58,13 @@ class CPUBenchmark:
         self.light_benchmark = LightBenchmark(self)
         self.heavy_benchmark = HeavyBenchmark(self)
         
-        # Initialize log file name
-        self.log_filename = f"benchmark_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        # Create logs directory if it doesn't exist
+        logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+        
+        # Set log filename in logs directory
+        self.log_filename = os.path.join(logs_dir, f"benchmark_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
         
     def _init_hpet(self):
         """Initialize High Precision Event Timer if available."""

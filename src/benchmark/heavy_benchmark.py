@@ -59,7 +59,7 @@ class HeavyBenchmark:
                 elapsed = current_time - start_time
                 if elapsed > 0:
                     ops_per_sec = (iterations * vector_ops) / elapsed
-                    log(f"Heavy AVX test, Core {physical_core_id}: {ops_per_sec:.2f} vector ops/sec (running for {elapsed:.2f}s)")
+                    log(f"AVX test, Core {physical_core_id}: {ops_per_sec:.2f} vector ops/sec (running for {elapsed:.2f}s)")
                     
                     # Store progress data point for graphing
                     progress_data.append({
@@ -112,12 +112,12 @@ class HeavyBenchmark:
         return result
         
     def run_multithreaded_test(self, duration=10):
-        """Run a multi-threaded heavy AVX test using all available cores."""
+        """Run a multi-threaded  AVX test using all available cores."""
         log = self.parent._log
         get_time = self.parent._get_precise_time
         cpu_count = self.parent.cpu_count
         
-        log(f"Starting multi-threaded heavy AVX test with {cpu_count} threads...")
+        log(f"Starting multi-threaded AVX test with {cpu_count} threads...")
         
         # Create a shared stop event for all threads
         stop_event = threading.Event()
@@ -253,7 +253,7 @@ class HeavyBenchmark:
         }
         
         # Log results
-        log(f"\nMulti-threaded heavy AVX test complete:")
+        log(f"\nMulti-threaded AVX test complete:")
         log(f"  Threads: {len(thread_results)}")
         log(f"  Total Vector Operations: {total_ops:,}")
         log(f"  Time: {overall_elapsed:.2f} seconds")

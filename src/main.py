@@ -13,4 +13,5 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
+    # This is the correct entry point for the application
     main()

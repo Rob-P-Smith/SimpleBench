@@ -11,9 +11,21 @@ class LightBenchmark:
     
     def __init__(self, parent_benchmark):
         """Initialize with a reference to the parent benchmark."""
-        self.parent = parent_benchmark
-        # Load NumPy with optimizations enabled
-        np.show_config()
+        self.parent = parent_benchmark        
+        # Suppress warnings temporarily during configuration display
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # Check NumPy configuration but suppress output
+            try:
+                import io
+                import sys
+                original_stdout = sys.stdout
+                sys.stdout = io.StringIO()
+                np.show_config()
+                sys.stdout = original_stdout
+            except Exception:
+                pass
         
     def run_single_core_test(self, core_id, duration=10):
         """Run light load integer test on a single core using SSE2."""

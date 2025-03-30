@@ -1,8 +1,8 @@
-import tkinter as tk
 from tkinter import ttk, messagebox
-import threading
+import tkinter as tk
 import os
 import sys
+import threading
 from datetime import datetime
 
 # Add the parent directory to sys.path to enable imports when run directly
@@ -19,23 +19,27 @@ from src.gui.graphs import BenchmarkGraphs
 class MainWindow:
     def __init__(self, root):
         self.root = root
-        self.root.title("CPU Core Benchmark")
+        self.root.title("SimpleBench CPU Benchmark")
         self.root.geometry("800x600")
+        self.root.minsize(800, 600)
         
+        # Initialize benchmark engine
         self.benchmark = CPUBenchmark()
-        self.benchmark_thread = None
-        self.is_running = False
         
-        # Initialize graph handler
+        # Initialize graph module
         self.graphs = BenchmarkGraphs(root)
         
-        # Test selection variables
+        # Create variables for checkboxes
         self.run_light_tests = tk.BooleanVar(value=True)
         self.run_heavy_tests = tk.BooleanVar(value=True)
         self.run_multicore_tests = tk.BooleanVar(value=True)
         
-        self._create_widgets()
+        # Flag to track if a benchmark is running
+        self.is_running = False
         
+        # Create widgets
+        self._create_widgets()
+    
     def _create_widgets(self):
         # Create top frame for controls
         control_frame = ttk.Frame(self.root, padding="10")
@@ -86,29 +90,27 @@ class MainWindow:
         
         # Create "Clear All" button
         clear_all_button = ttk.Button(test_type_frame, text="Clear All", 
-                                     command=lambda: self._set_all_tests(False))
+                                    command=lambda: self._set_all_tests(False))
         clear_all_button.pack(side=tk.LEFT, padx=(0, 20))
         
-        # Light test checkbox
-        light_check = ttk.Checkbutton(test_type_frame, text="Light Load Tests", 
-                                     variable=self.run_light_tests)
+        # SSE test checkbox (formerly Light)
+        light_check = ttk.Checkbutton(test_type_frame, text="SSE Tests", 
+                                    variable=self.run_light_tests)
         light_check.pack(side=tk.LEFT, padx=10)
         
-        # Heavy test checkbox
-        heavy_check = ttk.Checkbutton(test_type_frame, text="Heavy Load Tests", 
-                                     variable=self.run_heavy_tests)
+        # AVX test checkbox (formerly Heavy)
+        heavy_check = ttk.Checkbutton(test_type_frame, text="AVX Tests", 
+                                    variable=self.run_heavy_tests)
         heavy_check.pack(side=tk.LEFT, padx=10)
         
         # Multi-core test checkbox
         multicore_check = ttk.Checkbutton(test_type_frame, text="Multi-Core Tests", 
-                                         variable=self.run_multicore_tests)
+                                        variable=self.run_multicore_tests)
         multicore_check.pack(side=tk.LEFT, padx=10)
         
-        # Create results view
-        self.results_frame = ttk.Frame(self.root, padding="10")
-        self.results_frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.results_view = ResultsView(self.results_frame)
+        # Create results view area
+        # Create ResultsView instance
+        self.results_view = ResultsView(self.root)
     
     def _set_all_tests(self, value):
         """Set all test selection checkboxes to the given value."""
@@ -132,7 +134,7 @@ class MainWindow:
         
         # Check if at least one test type is selected
         if not any([self.run_light_tests.get(), self.run_heavy_tests.get()]):
-            messagebox.showerror("Invalid Selection", "Please select at least one test type (Light or Heavy).")
+            messagebox.showerror("Invalid Selection", "Please select at least one test type (SSE or AVX).")
             return
             
         # Get the duration from the entry field
@@ -166,17 +168,14 @@ class MainWindow:
         self.results_view.add_message(f"Tests selected:")
         
         if run_light:
-            self.results_view.add_message(f"  - Light Load Tests: Simple operations to measure basic performance")
+            self.results_view.add_message(f"  - SSE Tests: Simple integer operations to measure basic performance")
         if run_heavy:
-            self.results_view.add_message(f"  - Heavy Load Tests: Vector operations to stress the CPU")
+            self.results_view.add_message(f"  - AVX Tests: Vector operations to stress the CPU")
         if run_multicore:
             self.results_view.add_message(f"  - Multi-threaded tests using all logical cores")
         else:
             self.results_view.add_message(f"  - Single-core tests only")
-            
-        self.results_view.add_message(f"Testing even-numbered logical cores only (one thread per physical core)")
-        self.results_view.add_message("")
-
+    
         def run_benchmark():
             try:
                 self.benchmark.start(
@@ -205,11 +204,18 @@ class MainWindow:
         
     def _save_results(self):
         try:
+            # Create results directory if it doesn't exist
+            results_dir = os.path.join(project_root, "results")
+            if not os.path.exists(results_dir):
+                os.makedirs(results_dir)
+                
             filename = f"benchmark_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            with open(filename, "w") as f:
+            filepath = os.path.join(results_dir, filename)
+            
+            with open(filepath, "w", encoding="utf-8") as f:
                 f.write(self.results_view.get_all_text())
             
-            messagebox.showinfo("Save Successful", f"Results saved to {os.path.abspath(filename)}")
+            messagebox.showinfo("Save Successful", f"Results saved to {os.path.abspath(filepath)}")
         except Exception as e:
             messagebox.showerror("Save Failed", f"Failed to save results: {str(e)}")
     
@@ -254,17 +260,3 @@ class MainWindow:
         self.duration_entry.config(state=tk.NORMAL)
         
         messagebox.showerror("Benchmark Error", f"An error occurred: {error_message}")
-
-# Add this at the bottom of the file to allow direct execution
-if __name__ == "__main__":
-    # Configure path for imports when run directly
-    if __package__ is None:
-        import sys
-        from pathlib import Path
-        file_path = Path(__file__).resolve()
-        parent = file_path.parent.parent.parent
-        sys.path.append(str(parent))
-        
-    root = tk.Tk()
-    app = MainWindow(root)
-    root.mainloop()
