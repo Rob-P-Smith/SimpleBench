@@ -27,6 +27,8 @@ except ImportError:
 from ctypes import byref, c_ulonglong
 from src.benchmark.light_benchmark import LightBenchmark
 from src.benchmark.heavy_benchmark import HeavyBenchmark
+from src.benchmark.sse_heavy_benchmark import SSEHeavyBenchmark
+from src.benchmark.avx_heavy_benchmark import AVXHeavyBenchmark
 from src.utils.hpet_timer import HPETTimer
 
 class CPUBenchmark:
@@ -57,6 +59,8 @@ class CPUBenchmark:
         # Initialize test modules
         self.light_benchmark = LightBenchmark(self)
         self.heavy_benchmark = HeavyBenchmark(self)
+        self.sse_heavy_benchmark = SSEHeavyBenchmark(self)
+        self.avx_heavy_benchmark = AVXHeavyBenchmark(self)
         
         # Initialize log file name
         self.log_filename = f"benchmark_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
@@ -245,7 +249,8 @@ class CPUBenchmark:
                 pass
 
     def start(self, progress_callback=None, completed_callback=None, duration_per_core=10,
-          run_light_tests=True, run_heavy_tests=True, run_multicore_tests=True):
+          run_light_tests=True, run_heavy_tests=True, run_sse_heavy_tests=True, 
+          run_avx_heavy_tests=True, run_multicore_tests=True):
         """Start the benchmark process."""
         if self.running:
             return False
@@ -267,14 +272,16 @@ class CPUBenchmark:
         # Start benchmark in a separate thread
         self._benchmark_thread = threading.Thread(
             target=self._run_benchmark,
-            args=(duration_per_core, run_light_tests, run_heavy_tests, run_multicore_tests)
+            args=(duration_per_core, run_light_tests, run_heavy_tests, 
+                  run_sse_heavy_tests, run_avx_heavy_tests, run_multicore_tests)
         )
         self._benchmark_thread.daemon = True
         self._benchmark_thread.start()
         
         return True
 
-    def _run_benchmark(self, duration_per_core, run_light_tests, run_heavy_tests, run_multicore_tests):
+    def _run_benchmark(self, duration_per_core, run_light_tests, run_heavy_tests, 
+                       run_sse_heavy_tests, run_avx_heavy_tests, run_multicore_tests):
         """Run the benchmark suite with the specified options."""
         try:
             # Get physical cores to test
@@ -290,10 +297,21 @@ class CPUBenchmark:
                 self._log("Starting heavy load tests on individual cores")
                 self._run_single_core_tests(core_ids, 'heavy', duration_per_core)
             
+            # Run SSE-Heavy load tests on each physical core
+            if run_sse_heavy_tests:
+                self._log("Starting SSE-Heavy load tests on individual cores")
+                self._run_single_core_tests(core_ids, 'sse-heavy', duration_per_core)
+            
+            # Run AVX-Heavy load tests on each physical core
+            if run_avx_heavy_tests:
+                self._log("Starting AVX-Heavy load tests on individual cores")
+                self._run_single_core_tests(core_ids, 'avx-heavy', duration_per_core)
+            
             # Run multi-threaded tests
             if run_multicore_tests:
                 self._log("\nStarting multi-threaded tests using all cores")
-                self._run_multicore_tests(duration_per_core, run_light_tests, run_heavy_tests)
+                self._run_multicore_tests(duration_per_core, run_light_tests, run_heavy_tests, 
+                                        run_sse_heavy_tests, run_avx_heavy_tests)
             
             # Complete the benchmark
             self._log("\nAll benchmarks completed!")
@@ -336,63 +354,55 @@ class CPUBenchmark:
                 # Log test start time to file (blocking operation)
                 self._log_test_start(core_id, test_type)
                 
-                if test_type == 'light':
-                    # Light load test
-                    self._log(f"Starting light load benchmark on Core {physical_core_id}...")
-                    self.current_core = core_id
+                # Set process affinity to this core
+                process = psutil.Process()
+                original_affinity = process.cpu_affinity()
+                
+                try:
+                    # Set affinity to only use the specified core
+                    process.cpu_affinity([core_id])
                     
-                    # Set process affinity to this core
-                    process = psutil.Process()
-                    original_affinity = process.cpu_affinity()
+                    # Initialize core results if needed
+                    if core_id not in self.results:
+                        self.results[core_id] = {}
                     
-                    try:
-                        # Set affinity to only use the specified core
-                        process.cpu_affinity([core_id])
-                        
-                        # Run the test
+                    if test_type == 'light':
+                        # Light load test
+                        self._log(f"Starting light load benchmark on Core {physical_core_id}...")
+                        self.current_core = core_id
                         light_result = self.light_benchmark.run_single_core_test(core_id, duration)
-                        
-                        # Initialize core results if needed
-                        if core_id not in self.results:
-                            self.results[core_id] = {}
-                            
                         self.results[core_id]['light'] = light_result
-                    finally:
-                        # Restore original affinity
-                        try:
-                            process.cpu_affinity(original_affinity)
-                        except Exception:
-                            pass
-                    
-                elif test_type == 'heavy':
-                    # Heavy load test
-                    self._log(f"Starting heavy AVX load benchmark on Core {physical_core_id}...")
-                    self.current_core = core_id
-                    
-                    # Set process affinity to this core
-                    process = psutil.Process()
-                    original_affinity = process.cpu_affinity()
-                    
-                    try:
-                        # Set affinity to only use the specified core
-                        process.cpu_affinity([core_id])
                         
-                        # Run the test
+                    elif test_type == 'heavy':
+                        # Heavy load test
+                        self._log(f"Starting heavy AVX load benchmark on Core {physical_core_id}...")
+                        self.current_core = core_id
                         heavy_result = self.heavy_benchmark.run_single_core_test(core_id, duration)
-                        
-                        # Initialize core results if needed
-                        if core_id not in self.results:
-                            self.results[core_id] = {}
-                            
                         self.results[core_id]['heavy'] = heavy_result
-                    finally:
-                        # Restore original affinity
-                        try:
-                            process.cpu_affinity(original_affinity)
-                        except Exception:
-                            pass
+                        
+                    elif test_type == 'sse-heavy':
+                        # SSE-Heavy load test
+                        self._log(f"Starting SSE-Heavy load benchmark on Core {physical_core_id}...")
+                        self.current_core = core_id
+                        sse_heavy_result = self.sse_heavy_benchmark.run_single_core_test(core_id, duration)
+                        self.results[core_id]['sse-heavy'] = sse_heavy_result
+                        
+                    elif test_type == 'avx-heavy':
+                        # AVX-Heavy load test
+                        self._log(f"Starting AVX-Heavy load benchmark on Core {physical_core_id}...")
+                        self.current_core = core_id
+                        avx_heavy_result = self.avx_heavy_benchmark.run_single_core_test(core_id, duration)
+                        self.results[core_id]['avx-heavy'] = avx_heavy_result
+                        
+                finally:
+                    # Restore original affinity
+                    try:
+                        process.cpu_affinity(original_affinity)
+                    except Exception:
+                        pass
 
-    def _run_multicore_tests(self, duration, run_light_tests, run_heavy_tests):
+    def _run_multicore_tests(self, duration, run_light_tests, run_heavy_tests, 
+                           run_sse_heavy_tests, run_avx_heavy_tests):
         """Run multi-threaded benchmarks."""
         # Initialize multicore results container
         self.results['multithreaded'] = {}
@@ -426,6 +436,34 @@ class CPUBenchmark:
                 self._log(f"Heavy load multi-threaded test complete.")
                 self._log(f"  Time: {heavy_result['elapsed_seconds']:.2f} seconds")
                 self._log(f"  Overall performance: {heavy_result['operations_per_second']:,.2f} ops/sec")
+                
+            # Run SSE-Heavy load multithreaded test
+            if run_sse_heavy_tests:
+                # Log test start time to file (blocking operation)
+                self._log_test_start('multithreaded', 'sse-heavy')
+                
+                self._log("Running multi-threaded SSE-Heavy load test...")
+                self.current_core = 'multithreaded-sse-heavy'
+                sse_heavy_result = self.sse_heavy_benchmark.run_multithreaded_test(duration)
+                self.results['multithreaded']['sse-heavy'] = sse_heavy_result
+                
+                self._log(f"SSE-Heavy load multi-threaded test complete.")
+                self._log(f"  Time: {sse_heavy_result['elapsed_seconds']:.2f} seconds")
+                self._log(f"  Overall performance: {sse_heavy_result['operations_per_second']:,.2f} ops/sec")
+                
+            # Run AVX-Heavy load multithreaded test
+            if run_avx_heavy_tests:
+                # Log test start time to file (blocking operation)
+                self._log_test_start('multithreaded', 'avx-heavy')
+                
+                self._log("Running multi-threaded AVX-Heavy load test...")
+                self.current_core = 'multithreaded-avx-heavy'
+                avx_heavy_result = self.avx_heavy_benchmark.run_multithreaded_test(duration)
+                self.results['multithreaded']['avx-heavy'] = avx_heavy_result
+                
+                self._log(f"AVX-Heavy load multi-threaded test complete.")
+                self._log(f"  Time: {avx_heavy_result['elapsed_seconds']:.2f} seconds")
+                self._log(f"  Overall performance: {avx_heavy_result['operations_per_second']:,.2f} ops/sec")
             
         except Exception as e:
             self._log(f"Error in multi-threaded tests: {str(e)}")

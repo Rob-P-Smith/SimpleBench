@@ -30,9 +30,13 @@ class MainWindow:
         self.graphs = BenchmarkGraphs(root)
         
         # Test selection variables
-        self.run_light_tests = tk.BooleanVar(value=True)
+        self.benchmark_type = tk.StringVar(value="light")  # Default to light benchmark
         self.run_heavy_tests = tk.BooleanVar(value=True)
         self.run_multicore_tests = tk.BooleanVar(value=True)
+        
+        # New variables for SSE and AVX benchmarks
+        self.run_sse_heavy_tests = tk.BooleanVar(value=False)
+        self.run_avx_heavy_tests = tk.BooleanVar(value=False)
         
         self._create_widgets()
         
@@ -79,42 +83,40 @@ class MainWindow:
         test_type_frame = ttk.Frame(test_frame)
         test_type_frame.pack(fill=tk.X, pady=5)
         
-        # Create "Run All Tests" button
-        run_all_button = ttk.Button(test_type_frame, text="Run All Tests", 
-                                    command=lambda: self._set_all_tests(True))
-        run_all_button.pack(side=tk.LEFT, padx=(0, 10))
+        # Create benchmark type radio buttons frame
+        benchmark_type_frame = ttk.LabelFrame(test_frame, text="Benchmark Type", padding="5")
+        benchmark_type_frame.pack(fill=tk.X, pady=5, padx=5)
         
-        # Create "Clear All" button
-        clear_all_button = ttk.Button(test_type_frame, text="Clear All", 
-                                     command=lambda: self._set_all_tests(False))
-        clear_all_button.pack(side=tk.LEFT, padx=(0, 20))
+        # Create radio buttons for benchmark types
+        ttk.Radiobutton(benchmark_type_frame, text="SSE Simple Load (Basic Operations)", 
+                    variable=self.benchmark_type, value="light").pack(anchor=tk.W, padx=10, pady=2)
+
+        ttk.Radiobutton(benchmark_type_frame, text="SSE-Heavy Load (SSE2 Vector Operations)", 
+                    variable=self.benchmark_type, value="sse-heavy").pack(anchor=tk.W, padx=10, pady=2)
+
+        # Enable AVX option
+        ttk.Radiobutton(benchmark_type_frame, text="AVX-Heavy Load (AVX Vector Operations)", 
+                    variable=self.benchmark_type, value="avx-heavy").pack(anchor=tk.W, padx=10, pady=2)
         
-        # Light test checkbox
-        light_check = ttk.Checkbutton(test_type_frame, text="Light Load Tests", 
-                                     variable=self.run_light_tests)
-        light_check.pack(side=tk.LEFT, padx=10)
+        # Additional options frame
+        options_frame = ttk.LabelFrame(test_frame, text="Additional Options", padding="5")
+        options_frame.pack(fill=tk.X, pady=5, padx=5)
         
         # Heavy test checkbox
-        heavy_check = ttk.Checkbutton(test_type_frame, text="Heavy Load Tests", 
+        heavy_check = ttk.Checkbutton(options_frame, text="Run Heavy Load Tests", 
                                      variable=self.run_heavy_tests)
-        heavy_check.pack(side=tk.LEFT, padx=10)
+        heavy_check.pack(anchor=tk.W, padx=10, pady=2)
         
         # Multi-core test checkbox
-        multicore_check = ttk.Checkbutton(test_type_frame, text="Multi-Core Tests", 
+        multicore_check = ttk.Checkbutton(options_frame, text="Run Multi-Core Tests", 
                                          variable=self.run_multicore_tests)
-        multicore_check.pack(side=tk.LEFT, padx=10)
+        multicore_check.pack(anchor=tk.W, padx=10, pady=2)
         
         # Create results view
         self.results_frame = ttk.Frame(self.root, padding="10")
         self.results_frame.pack(fill=tk.BOTH, expand=True)
         
         self.results_view = ResultsView(self.results_frame)
-    
-    def _set_all_tests(self, value):
-        """Set all test selection checkboxes to the given value."""
-        self.run_light_tests.set(value)
-        self.run_heavy_tests.set(value)
-        self.run_multicore_tests.set(value)
     
     def _validate_duration(self, value):
         """Validate that the entered duration is a number between 1 and 30."""
@@ -130,9 +132,18 @@ class MainWindow:
         if self.is_running:
             return
         
-        # Check if at least one test type is selected
-        if not any([self.run_light_tests.get(), self.run_heavy_tests.get()]):
-            messagebox.showerror("Invalid Selection", "Please select at least one test type (Light or Heavy).")
+        # Check benchmark selection
+        benchmark_type = self.benchmark_type.get()
+        run_heavy = self.run_heavy_tests.get()
+        
+        # Set benchmark flags based on radio selection
+        run_light_tests = benchmark_type == "light"
+        run_sse_heavy_tests = benchmark_type == "sse-heavy"
+        run_avx_heavy_tests = benchmark_type == "avx-heavy"
+        
+        # Make sure at least one test type is selected
+        if not any([run_light_tests, run_heavy, run_sse_heavy_tests, run_avx_heavy_tests]):
+            messagebox.showerror("Invalid Selection", "Please select at least one test type.")
             return
             
         # Get the duration from the entry field
@@ -155,9 +166,7 @@ class MainWindow:
         # Close any existing graph window
         self.graphs.close_window()
         
-        # Get test options
-        run_light = self.run_light_tests.get()
-        run_heavy = self.run_heavy_tests.get()
+        # Get multi-core test option
         run_multicore = self.run_multicore_tests.get()
         
         # Display selected tests
@@ -165,10 +174,19 @@ class MainWindow:
         self.results_view.add_message(f"Starting benchmark with {duration} seconds per test...")
         self.results_view.add_message(f"Tests selected:")
         
-        if run_light:
+        # Show selected benchmark type
+        if run_light_tests:
             self.results_view.add_message(f"  - Light Load Tests: Simple operations to measure basic performance")
+        elif run_sse_heavy_tests:
+            self.results_view.add_message(f"  - SSE-Heavy Load Tests: Vector operations using SSE2 instructions")
+        elif run_avx_heavy_tests:
+            self.results_view.add_message(f"  - AVX-Heavy Load Tests: Vector operations using AVX instructions")
+            
+        # Show if heavy tests are selected
         if run_heavy:
             self.results_view.add_message(f"  - Heavy Load Tests: Vector operations to stress the CPU")
+            
+        # Show if multi-core tests are selected
         if run_multicore:
             self.results_view.add_message(f"  - Multi-threaded tests using all logical cores")
         else:
@@ -183,8 +201,10 @@ class MainWindow:
                     progress_callback=self._update_progress,
                     completed_callback=self._benchmark_completed,
                     duration_per_core=duration,  # Pass the duration to the benchmark
-                    run_light_tests=run_light,
+                    run_light_tests=run_light_tests,
                     run_heavy_tests=run_heavy,
+                    run_sse_heavy_tests=run_sse_heavy_tests,
+                    run_avx_heavy_tests=run_avx_heavy_tests,
                     run_multicore_tests=run_multicore
                 )
             except Exception as err:
