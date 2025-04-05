@@ -7,7 +7,7 @@ import sys
 import ctypes
 
 class LightBenchmark:
-    """Handles light load benchmark tests using SSE2 integer operations."""
+    """Handles SSE load benchmark tests using SSE2 integer operations."""
     
     def __init__(self, parent_benchmark):
         """Initialize with a reference to the parent benchmark."""
@@ -16,7 +16,7 @@ class LightBenchmark:
         np.show_config()
         
     def run_single_core_test(self, core_id, duration=10):
-        """Run light load integer test on a single core using SSE2."""
+        """Run test on a single core using SSE2."""
         physical_core_id = core_id // 2  # Calculate physical core ID
         
         # Use parent's logging and timing functions
@@ -33,7 +33,7 @@ class LightBenchmark:
         b = np.ones(array_size, dtype=np.int32)
         c = np.zeros(array_size, dtype=np.int32)
         
-        # Prepare for a light workload benchmark with integer operations
+        # Prepare for a workload benchmark with integer operations
         iterations = 0
         ops_per_iteration = array_size * 4  # Each iteration processes array_size elements with 4 operations
         start_time = get_time()
@@ -59,7 +59,7 @@ class LightBenchmark:
                 elapsed = current_time - start_time
                 if elapsed > 0:
                     ops_per_sec = (iterations * ops_per_iteration) / elapsed
-                    log(f"Light int test, Core {physical_core_id}: {ops_per_sec:.2f} ops/sec (running for {elapsed:.2f}s)")
+                    log(f"SSE int test, Core {physical_core_id}: {ops_per_sec:.2f} ops/sec (running for {elapsed:.2f}s)")
                     
                     # Store progress data point for graphing
                     progress_data.append({
@@ -102,7 +102,7 @@ class LightBenchmark:
                 'progress': progress_data  # Store progress data in result
             }
             
-            log(f"Light SSE2 int test on Core {physical_core_id} complete:")
+            log(f"SSE2 int test on Core {physical_core_id} complete:")
             log(f"  Integer operations: {iterations * ops_per_iteration}")
             log(f"  Time: {elapsed:.2f} seconds")
             log(f"  Performance: {ops_per_sec:.2f} ops/sec")
@@ -112,12 +112,12 @@ class LightBenchmark:
         return result
         
     def run_multithreaded_test(self, duration=10):
-        """Run a multi-threaded light integer test using all available cores."""
+        """Run a multi-threaded SSE test using all available cores."""
         log = self.parent._log
         get_time = self.parent._get_precise_time
         cpu_count = self.parent.cpu_count
         
-        log(f"Starting multi-threaded light integer SSE2 test with {cpu_count} threads...")
+        log(f"Starting multi-threaded SSE2 test with {cpu_count} threads...")
         
         # Create a shared stop event for all threads
         stop_event = threading.Event()
@@ -162,7 +162,7 @@ class LightBenchmark:
                 'int_ops_per_iteration': ops_per_iteration
             }
             
-            # Light integer SSE2 load test implementation
+            # Integer SSE2 load test implementation
             while not stop_event.is_set():
                 # Simple integer vector operations using SSE2
                 c = a + b       # Addition
@@ -180,7 +180,7 @@ class LightBenchmark:
                         ops_per_sec = (iterations * ops_per_iteration) / elapsed
                         
                         with log_lock:
-                            log(f"MT light int test, Thread {thread_id}: {ops_per_sec:.2f} ops/sec")
+                            log(f"MT SSE test, Thread {thread_id}: {ops_per_sec:.2f} ops/sec")
                         
                         # Record progress data point with overall elapsed time
                         with progress_lock:
@@ -253,7 +253,7 @@ class LightBenchmark:
         }
         
         # Log results
-        log(f"\nMulti-threaded light SSE2 integer test complete:")
+        log(f"\nMulti-threaded SSE2 test complete:")
         log(f"  Threads: {len(thread_results)}")
         log(f"  Total Operations: {total_ops:,}")
         log(f"  Time: {overall_elapsed:.2f} seconds")

@@ -5,14 +5,14 @@ import win32pdh
 import numpy as np
 
 class HeavyBenchmark:
-    """Handles heavy load AVX benchmark tests (vector operations)."""
+    """Handles AVX benchmark tests (vector operations)."""
     
     def __init__(self, parent_benchmark):
         """Initialize with a reference to the parent benchmark."""
         self.parent = parent_benchmark
         
     def run_single_core_test(self, core_id, duration=10):
-        """Run heavy load AVX test on a single core."""
+        """Run AVX test on a single core."""
         physical_core_id = core_id // 2  # Calculate physical core ID
         
         # Use parent's logging and timing functions
@@ -33,16 +33,16 @@ class HeavyBenchmark:
         # Initialize progress data collection
         progress_data = []
         
-        # Prepare for a heavy workload benchmark
+        # Prepare for a workload benchmark
         iterations = 0
         vector_ops = array_size * 15  # Each iteration now does multiple vector operations
         start_time = get_time()
         end_time = start_time + duration
         current_time = start_time
         
-        # Execute heavy AVX operations to stress the CPU
+        # Execute AVX operations to stress the CPU
         while current_time < end_time and not self.parent._stop_event.is_set():
-            # Chain of heavy vector operations to fully utilize AVX units
+            # Chain of vector operations to fully utilize AVX units
             # Each iteration now does significantly more work
             for _ in range(5):  # Multiple passes of vector operations
                 c = np.sin(a) * np.cos(b) + np.sqrt(np.abs(a * b))
@@ -59,7 +59,7 @@ class HeavyBenchmark:
                 elapsed = current_time - start_time
                 if elapsed > 0:
                     ops_per_sec = (iterations * vector_ops) / elapsed
-                    log(f"Heavy AVX test, Core {physical_core_id}: {ops_per_sec:.2f} vector ops/sec (running for {elapsed:.2f}s)")
+                    log(f"AVX test, Core {physical_core_id}: {ops_per_sec:.2f} vector ops/sec (running for {elapsed:.2f}s)")
                     
                     # Store progress data point for graphing
                     progress_data.append({
@@ -102,7 +102,7 @@ class HeavyBenchmark:
                 'progress': progress_data  # Add progress data to result
             }
             
-            log(f"Heavy AVX load test on Core {physical_core_id} complete:")
+            log(f"AVX load test on Core {physical_core_id} complete:")
             log(f"  Vector operations: {iterations * vector_ops}")
             log(f"  Time: {elapsed:.2f} seconds")
             log(f"  Performance: {ops_per_sec:.2f} vector ops/sec")
@@ -112,12 +112,12 @@ class HeavyBenchmark:
         return result
         
     def run_multithreaded_test(self, duration=10):
-        """Run a multi-threaded heavy AVX test using all available cores."""
+        """Run a multi-threaded AVX test using all available cores."""
         log = self.parent._log
         get_time = self.parent._get_precise_time
         cpu_count = self.parent.cpu_count
         
-        log(f"Starting multi-threaded heavy AVX test with {cpu_count} threads...")
+        log(f"Starting multi-threaded AVX test with {cpu_count} threads...")
         
         # Create a shared stop event for all threads
         stop_event = threading.Event()
@@ -146,7 +146,7 @@ class HeavyBenchmark:
             except Exception:
                 pass  # Silently continue if we can't set thread priority
                 
-            # Heavy load AVX test implementation - increase intensity
+            # Load AVX test implementation - increase intensity
             array_size = 4000  # Larger array size for more intensive computation
             a = np.random.random(array_size).astype(np.float32)
             b = np.random.random(array_size).astype(np.float32)
@@ -162,7 +162,7 @@ class HeavyBenchmark:
             thread_result = {'thread_id': thread_id, 'iterations': 0}
             
             while not stop_event.is_set():
-                # Chain of heavy vector operations to fully utilize AVX units
+                # Chain of vector operations to fully utilize AVX units
                 for _ in range(5):  # Multiple passes of complex vector operations
                     c = np.sin(a) * np.cos(b) + np.sqrt(np.abs(a * b))
                     d = np.exp(np.abs(c) * 0.01) + np.log(np.abs(b) + 1.0)
@@ -180,7 +180,7 @@ class HeavyBenchmark:
                         ops_per_sec = (iterations * vector_ops) / elapsed
                         
                         with log_lock:
-                            log(f"MT heavy test, Thread {thread_id}: {ops_per_sec:.2f} vector ops/sec")
+                            log(f"MT AVX test, Thread {thread_id}: {ops_per_sec:.2f} vector ops/sec")
                         
                         # Record progress data point with overall elapsed time
                         with progress_lock:
@@ -253,7 +253,7 @@ class HeavyBenchmark:
         }
         
         # Log results
-        log(f"\nMulti-threaded heavy AVX test complete:")
+        log(f"\nMulti-threaded AVX test complete:")
         log(f"  Threads: {len(thread_results)}")
         log(f"  Total Vector Operations: {total_ops:,}")
         log(f"  Time: {overall_elapsed:.2f} seconds")
