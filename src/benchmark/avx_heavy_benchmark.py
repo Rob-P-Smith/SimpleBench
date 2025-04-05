@@ -173,6 +173,9 @@ class AVXHeavyBenchmark:
         last_update_time = start_time
         update_interval = 0.4  # Update every 400ms
         
+        # Initialize progress data collection for single core tests
+        progress_data = []
+        
         # Run until the duration is reached
         while self.controller._get_precise_time() < end_time and not self.stop_flag:
             # First run: AVX vector operations on arrays
@@ -200,6 +203,12 @@ class AVXHeavyBenchmark:
                 total_ops = iterations * vector_ops_per_iteration
                 ops_per_sec = total_ops / elapsed if elapsed > 0 else 0
                 
+                # Store progress data point for graphing
+                progress_data.append({
+                    'elapsed_seconds': elapsed,
+                    'operations_per_second': ops_per_sec
+                })
+                
                 # Format output to match other benchmarks
                 physical_core_id = thread_id // 2  # Convert logical to physical core ID
                 if self.controller.progress_callback:
@@ -217,7 +226,8 @@ class AVXHeavyBenchmark:
             'iterations': iterations,
             'time': actual_time,
             'operations_per_second': iterations / actual_time if actual_time > 0 else 0,
-            'pi_approximation': np.mean(pi_values) if pi_values else 0
+            'pi_approximation': np.mean(pi_values) if pi_values else 0,
+            'progress': progress_data if is_single_core else []  # Add progress data for graphing
         }
 
     def run_single_core_test(self, core_id, duration):
@@ -251,14 +261,16 @@ class AVXHeavyBenchmark:
                     'operations_per_second': thread_result['operations_per_second'],
                     'iterations': thread_result['iterations'],
                     'elapsed_seconds': thread_result['time'],
-                    'pi_approximation': thread_result['pi_approximation']
+                    'pi_approximation': thread_result['pi_approximation'],
+                    'progress': thread_result['progress']  # Include progress data in the result
                 }
             else:
                 return {
                     'operations_per_second': 0,
                     'iterations': 0,
                     'elapsed_seconds': duration,
-                    'error': 'No results collected'
+                    'error': 'No results collected',
+                    'progress': []
                 }
                 
         except Exception as e:
@@ -267,7 +279,8 @@ class AVXHeavyBenchmark:
                 'operations_per_second': 0,
                 'iterations': 0,
                 'elapsed_seconds': duration,
-                'error': str(e)
+                'error': str(e),
+                'progress': []
             }
     
     def run_multithreaded_test(self, duration):
@@ -296,6 +309,9 @@ class AVXHeavyBenchmark:
         last_update_time = start_time
         update_interval = 0.4  # Update every 400ms
         
+        # Initialize progress data for multi-threaded test
+        progress_data = []
+        
         try:
             # Start a worker thread for each logical core
             for i in range(thread_count):
@@ -319,6 +335,18 @@ class AVXHeavyBenchmark:
                     elapsed = current_time - start_time
                     percent_complete = min(100, (elapsed / duration) * 100)
                     remaining = max(0, duration - elapsed)
+                    
+                    # Calculate current performance estimate
+                    current_ops = 0
+                    for thread_id, result in result_dict.items():
+                        if 'operations_per_second' in result:
+                            current_ops += result['operations_per_second']
+                    
+                    # Add progress data point
+                    progress_data.append({
+                        'elapsed_seconds': elapsed,
+                        'operations_per_second': current_ops
+                    })
                     
                     # Show progress message in the same format as other benchmarks
                     self.controller._log(f"MT AVX test: {percent_complete:.1f}% complete, {remaining:.1f}s remaining, {remaining_threads} threads active")
@@ -344,7 +372,8 @@ class AVXHeavyBenchmark:
                 'total_operations': total_operations,
                 'operations_per_second': operations_per_second,
                 'elapsed_seconds': actual_duration,
-                'average_pi_approximation': avg_pi
+                'average_pi_approximation': avg_pi,
+                'progress': progress_data  # Include progress data
             }
             
         except Exception as e:
@@ -353,7 +382,8 @@ class AVXHeavyBenchmark:
                 'thread_count': thread_count,
                 'operations_per_second': 0,
                 'elapsed_seconds': duration,
-                'error': str(e)
+                'error': str(e),
+                'progress': []
             }
 
     def stop(self):

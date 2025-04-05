@@ -1,8 +1,8 @@
-import tkinter as tk
 from tkinter import ttk
+import tkinter as tk
+import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import matplotlib.pyplot as plt
 import numpy as np
 
 class BenchmarkGraphs:
@@ -35,18 +35,11 @@ class BenchmarkGraphs:
         notebook = ttk.Notebook(self.results_window)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Create tabs for light and heavy tests
-        light_tab = ttk.Frame(notebook)
-        heavy_tab = ttk.Frame(notebook)
-        summary_tab = ttk.Frame(notebook)
-        
-        notebook.add(light_tab, text="SSE Test Results")
-        notebook.add(heavy_tab, text="AVX Test Results")
-        notebook.add(summary_tab, text="Summary")
-        
-        # Extract progress data from benchmark results if available
+        # Track which test types have data
         has_light_data = False
         has_heavy_data = False
+        has_sse_heavy_data = False
+        has_avx_heavy_data = False
         
         # Check if we have progress data in results
         for core_id, data in benchmark_results.items():
@@ -55,23 +48,55 @@ class BenchmarkGraphs:
                     has_light_data = True
                 if 'heavy' in data and 'progress' in data['heavy']:
                     has_heavy_data = True
+                if 'sse-heavy' in data and 'progress' in data['sse-heavy']:
+                    has_sse_heavy_data = True
+                if 'avx-heavy' in data and 'progress' in data['avx-heavy']:
+                    has_avx_heavy_data = True
         
-        # Add performance graphs
+        # Only create tabs for tests that have data
         if has_light_data:
-            self._create_performance_graph(light_tab, benchmark_results, 'light', "SSE Load Performance Over Time")
+            light_tab = ttk.Frame(notebook)
+            notebook.add(light_tab, text="SSE Simple Test")
+            self._create_performance_graph(light_tab, benchmark_results, 'light', 
+                                          "SSE Simple Load Performance Over Time")
             
         if has_heavy_data:
-            self._create_performance_graph(heavy_tab, benchmark_results, 'heavy', "AVX Load Performance Over Time")
-        
-        # Create summary display
-        self._create_summary_display(summary_tab, benchmark_results)
+            heavy_tab = ttk.Frame(notebook)
+            notebook.add(heavy_tab, text="AVX Simple Test")
+            self._create_performance_graph(heavy_tab, benchmark_results, 'heavy', 
+                                          "AVX Simple Load Performance Over Time")
+            
+        if has_sse_heavy_data:
+            sse_heavy_tab = ttk.Frame(notebook)
+            notebook.add(sse_heavy_tab, text="SSE-Heavy Test")
+            self._create_performance_graph(sse_heavy_tab, benchmark_results, 'sse-heavy', 
+                                          "SSE-Heavy Load Performance Over Time")
+            
+        if has_avx_heavy_data:
+            avx_heavy_tab = ttk.Frame(notebook)
+            notebook.add(avx_heavy_tab, text="AVX-Heavy Test")
+            self._create_performance_graph(avx_heavy_tab, benchmark_results, 'avx-heavy', 
+                                          "AVX-Heavy Load Performance Over Time")
     
     def _create_performance_graph(self, parent_frame, benchmark_results, test_type, title):
         """Create a performance graph for a specific test type using collected data."""
         frame = ttk.Frame(parent_frame)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Create matplotlib figure
+        # Determine if we need to split the display into graph and summary
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=4)  # Graph takes 80% of height
+        frame.rowconfigure(1, weight=1)  # Summary takes 20% of height
+        
+        # Create a frame for the graph
+        graph_frame = ttk.Frame(frame)
+        graph_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        
+        # Create a frame for the summary text
+        summary_frame = ttk.Frame(frame)
+        summary_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        
+        # Create matplotlib figure for the graph
         fig = Figure(figsize=(10, 6), dpi=100)
         ax = fig.add_subplot(111)
         
@@ -83,7 +108,7 @@ class BenchmarkGraphs:
         
         # Skip if no cores have data
         if not cores:
-            label = ttk.Label(frame, text="No progress data available for plotting")
+            label = ttk.Label(graph_frame, text="No progress data available for plotting")
             label.pack(pady=20)
             return
             
@@ -157,14 +182,12 @@ class BenchmarkGraphs:
                 # Add core number label directly on the line
                 # Use the midpoint of the line to place the label
                 if len(time_points) > 0:
-                    mid_idx = len(time_points) // 2
-                    ax.text(time_points[mid_idx], perf_points[mid_idx], 
-                            str(physical_core_id),  # Just the number
+                    midpoint_idx = len(time_points) // 2
+                    if midpoint_idx < len(time_points):
+                        ax.text(time_points[midpoint_idx], perf_points[midpoint_idx], 
+                            f" Core {physical_core_id}", 
                             color=color, 
-                            fontweight='bold',
-                            ha='center', 
-                            va='center',
-                            bbox=dict(facecolor='white', alpha=0.7, edgecolor=color, pad=1))
+                            fontweight='bold')
 
                 # Highlight points outside the acceptable range with red circles
                 outlier_times = []
@@ -176,8 +199,9 @@ class BenchmarkGraphs:
                         outlier_perfs.append(p)
                 
                 if outlier_times:
-                    ax.plot(outlier_times, outlier_perfs, 'o', color='red', 
-                            markersize=8, markerfacecolor='none', markeredgewidth=2)
+                    ax.scatter(outlier_times, outlier_perfs, s=80, facecolors='none', 
+                              edgecolors='red', linewidths=2, alpha=0.7,
+                              label=f"Core {physical_core_id} Outliers" if i == 0 else "")
             
             # Add horizontal lines for mean and ±20% thresholds
             ax.axhline(y=mean_performance, color='green', linestyle='-', alpha=0.7, label="Mean")
@@ -194,7 +218,19 @@ class BenchmarkGraphs:
             
             # Set labels and title
             ax.set_xlabel('Time (seconds)')
-            ax.set_ylabel('Operations per Second')
+            
+            # Set appropriate y-axis label based on test type
+            if test_type == 'light':
+                ax.set_ylabel('Operations per Second')
+            elif test_type == 'heavy':
+                ax.set_ylabel('Vector Operations per Second')
+            elif test_type == 'sse-heavy':
+                ax.set_ylabel('SSE Vector Operations per Second')
+            elif test_type == 'avx-heavy':
+                ax.set_ylabel('AVX Vector Operations per Second')
+            else:
+                ax.set_ylabel('Operations per Second')
+                
             ax.set_title(f"{title}\nMean: {mean_performance:.2f} ops/sec")
             ax.grid(True)
             
@@ -218,23 +254,23 @@ class BenchmarkGraphs:
             fig.tight_layout(rect=[0, 0, 0.85, 1])
             
             # Create canvas and display
-            canvas = FigureCanvasTkAgg(fig, master=frame)
+            canvas = FigureCanvasTkAgg(fig, master=graph_frame)
             canvas.draw()
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            # Add the summary text below the graph
+            self._create_summary_for_test(summary_frame, benchmark_results, test_type)
             
             self.graph_frames[test_type] = frame
         else:
             # No data points available
-            label = ttk.Label(frame, text="No performance data available for plotting")
+            label = ttk.Label(graph_frame, text="No performance data available for plotting")
             label.pack(pady=20)
     
-    def _create_summary_display(self, parent_frame, benchmark_results):
-        """Create summary display with text results."""
-        frame = ttk.Frame(parent_frame)
-        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+    def _create_summary_for_test(self, frame, benchmark_results, test_type):
+        """Create a summary display for a specific test type"""
         # Create text widget to display results
-        results_text = tk.Text(frame, wrap=tk.WORD, font=('Consolas', 10))
+        results_text = tk.Text(frame, wrap=tk.WORD, font=('Consolas', 10), height=10)
         scrollbar = ttk.Scrollbar(frame, command=results_text.yview)
         results_text.configure(yscrollcommand=scrollbar.set)
         
@@ -242,116 +278,96 @@ class BenchmarkGraphs:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         results_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Insert summary results
-        if not benchmark_results:
-            results_text.insert(tk.END, "No benchmark results available.")
-            return
-        
-        # Display header
-        results_text.insert(tk.END, "CPU BENCHMARK RESULTS SUMMARY\n\n")
-        results_text.tag_configure("header", font=('Consolas', 12, 'bold'))
-        results_text.tag_add("header", "1.0", "1.end")
-        
         # Format and display single core results
-        if any(core_id != 'multithreaded' for core_id in benchmark_results.keys()):
-            # Light test results
-            light_results = {}
-            for core_id, data in benchmark_results.items():
-                if core_id != 'multithreaded' and 'light' in data:
-                    light_results[core_id] = data['light']
-            
-            if light_results:
-                results_text.insert(tk.END, "LIGHT LOAD TEST RESULTS\n", "section")
-                results_text.tag_configure("section", font=('Consolas', 11, 'bold'))
-                self._format_test_results(results_text, light_results)
-            
-            # Heavy test results
-            heavy_results = {}
-            for core_id, data in benchmark_results.items():
-                if core_id != 'multithreaded' and 'heavy' in data:
-                    heavy_results[core_id] = data['heavy']
-            
-            if heavy_results:
-                results_text.insert(tk.END, "\nHEAVY LOAD TEST RESULTS\n", "section")
-                self._format_test_results(results_text, heavy_results)
+        test_results = {}
+        for core_id, data in benchmark_results.items():
+            if core_id != 'multithreaded' and test_type in data:
+                test_results[core_id] = data[test_type]
         
-        # Format and display multi-threaded results
-        if 'multithreaded' in benchmark_results:
-            mt_results = benchmark_results['multithreaded']
+        if test_results:
+            # Calculate statistics
+            ops_per_sec_values = [r['operations_per_second'] for r in test_results.values()]
+            avg_ops = sum(ops_per_sec_values) / len(test_results)
+            max_ops = max(ops_per_sec_values)
+            min_ops = min(ops_per_sec_values)
             
-            results_text.insert(tk.END, "\nMULTI-THREADED TEST RESULTS\n", "section")
+            # Set appropriate unit based on test type
+            ops_unit = "ops/sec"
+            if test_type == 'heavy':
+                ops_unit = "vector ops/sec"
+            elif test_type == 'sse-heavy':
+                ops_unit = "SSE vector ops/sec"
+            elif test_type == 'avx-heavy':
+                ops_unit = "AVX vector ops/sec"
             
-            if 'light' in mt_results:
-                light = mt_results['light']
-                results_text.insert(tk.END, "\nLight Load Multi-Threaded Test:\n", "subsection")
-                results_text.tag_configure("subsection", font=('Consolas', 10, 'bold'))
-                results_text.insert(tk.END, f"  Threads: {light['thread_count']}\n")
-                results_text.insert(tk.END, f"  Total operations: {light['total_iterations']:,}\n")
-                results_text.insert(tk.END, f"  Time: {light['elapsed_seconds']:.2f} seconds\n")
-                results_text.insert(tk.END, f"  Overall performance: {light['operations_per_second']:,.2f} ops/sec\n")
+            # Display statistics
+            title = ""
+            if test_type == 'light':
+                title = "SSE SIMPLE LOAD TEST SUMMARY"
+            elif test_type == 'heavy':
+                title = "AVX SIMPLE LOAD TEST SUMMARY"
+            elif test_type == 'sse-heavy':
+                title = "SSE-HEAVY LOAD TEST SUMMARY"
+            elif test_type == 'avx-heavy':
+                title = "AVX-HEAVY LOAD TEST SUMMARY"
+                
+            results_text.insert(tk.END, f"{title}\n\n", "heading")
+            results_text.tag_configure("heading", font=('Consolas', 10, 'bold'))
             
-            if 'heavy' in mt_results:
-                heavy = mt_results['heavy']
-                results_text.insert(tk.END, "\nHeavy Load Multi-Threaded Test:\n", "subsection")
-                results_text.insert(tk.END, f"  Threads: {heavy['thread_count']}\n")
-                results_text.insert(tk.END, f"  Time: {heavy['elapsed_seconds']:.2f} seconds\n")
-                results_text.insert(tk.END, f"  Overall performance: {heavy['operations_per_second']:,.2f} ops/sec\n")
+            results_text.insert(tk.END, f"Average {ops_unit} per core: {avg_ops:.2f}\n")
+            results_text.insert(tk.END, f"Maximum {ops_unit}: {max_ops:.2f}\n")
+            results_text.insert(tk.END, f"Minimum {ops_unit}: {min_ops:.2f}\n\n")
+            
+            # Core performance ranking
+            results_text.insert(tk.END, "CORE PERFORMANCE RANKING (Higher is Better)\n", "subheading")
+            results_text.tag_configure("subheading", font=('Consolas', 10, 'bold'))
+            
+            ranked_cores = sorted(
+                [(core_id, data['operations_per_second']) for core_id, data in test_results.items()],
+                key=lambda x: x[1], 
+                reverse=True
+            )
+            
+            for i, (logical_core_id, ops) in enumerate(ranked_cores):
+                rank = i + 1
+                physical_core_id = logical_core_id // 2  # Convert logical to physical core ID
+                deviation_pct = (ops/avg_ops - 1) * 100
+                line = f"Core {physical_core_id}: {ops:.2f} {ops_unit}  #{rank}  ({deviation_pct:+.2f}% from mean)\n"
+                results_text.insert(tk.END, line)
+            
+            # Check for cores with performance deviation > 20%
+            deviation_threshold = 0.20  # 20%
+            unstable_cores = []
+            
+            for logical_core_id, result in test_results.items():
+                ops = result['operations_per_second']
+                physical_core_id = logical_core_id // 2
+                deviation = abs(ops - avg_ops) / avg_ops
+                
+                if deviation > deviation_threshold:
+                    unstable_cores.append((physical_core_id, deviation, (ops - avg_ops)))
+            
+            results_text.insert(tk.END, "\n")
+            
+            if unstable_cores:
+                results_text.insert(tk.END, "⚠️ POTENTIAL INSTABILITY DETECTED\n", "warning")
+                results_text.tag_configure("warning", foreground="red", font=('Consolas', 10, 'bold'))
+                for physical_core_id, deviation, difference in unstable_cores:
+                    deviation_pct = deviation * 100
+                    direction = "above" if difference > 0 else "below"
+                    results_text.insert(tk.END, f"Core {physical_core_id} is {deviation_pct:.1f}% {direction} the mean\n")
+            else:
+                results_text.insert(tk.END, "✅ All cores within 20% of mean performance\n", "good")
+                results_text.tag_configure("good", foreground="green", font=('Consolas', 10, 'bold'))
+        
+        # Add multithreaded results if available
+        if 'multithreaded' in benchmark_results and test_type in benchmark_results['multithreaded']:
+            mt_data = benchmark_results['multithreaded'][test_type]
+            results_text.insert(tk.END, f"\nMULTI-THREADED {test_type.upper()} TEST\n", "subheading")
+            results_text.insert(tk.END, f"Threads: {mt_data.get('thread_count', 'N/A')}\n")
+            results_text.insert(tk.END, f"Total operations: {mt_data.get('total_operations', mt_data.get('total_iterations', 'N/A')):,}\n")
+            results_text.insert(tk.END, f"Time: {mt_data.get('elapsed_seconds', 'N/A'):.2f} seconds\n")
+            results_text.insert(tk.END, f"Overall performance: {mt_data.get('operations_per_second', 'N/A'):,.2f} {ops_unit}\n")
         
         # Make text read-only
         results_text.configure(state=tk.DISABLED)
-    
-    def _format_test_results(self, text_widget, results):
-        """Format and add test results to the text widget."""
-        if not results:
-            return
-            
-        # Calculate statistics
-        ops_per_sec_values = [r['operations_per_second'] for r in results.values()]
-        avg_ops = sum(ops_per_sec_values) / len(results)
-        max_ops = max(ops_per_sec_values)
-        min_ops = min(ops_per_sec_values)
-        
-        # Display statistics
-        text_widget.insert(tk.END, f"\nAverage ops/sec per core: {avg_ops:.2f}\n")
-        text_widget.insert(tk.END, f"Maximum ops/sec: {max_ops:.2f}\n")
-        text_widget.insert(tk.END, f"Minimum ops/sec: {min_ops:.2f}\n")
-        
-        # Rank cores by performance
-        text_widget.insert(tk.END, "\nCORE PERFORMANCE RANKING (Higher is Better)\n", "subsection")
-        
-        ranked_cores = sorted(
-            [(core_id, data['operations_per_second']) for core_id, data in results.items()],
-            key=lambda x: x[1], 
-            reverse=True
-        )
-        
-        for i, (logical_core_id, ops) in enumerate(ranked_cores):
-            rank = i + 1
-            physical_core_id = logical_core_id // 2  # Convert logical to physical core ID
-            deviation_pct = (ops/avg_ops - 1) * 100
-            line = f"Core {physical_core_id}: {ops:.2f} ops/sec  #{rank}  ({deviation_pct:+.2f}% from mean)\n"
-            text_widget.insert(tk.END, line)
-        
-        # Check for cores with performance deviation > 20%
-        deviation_threshold = 0.20  # 20%
-        unstable_cores = []
-        
-        for logical_core_id, result in results.items():
-            ops = result['operations_per_second']
-            physical_core_id = logical_core_id // 2
-            deviation = abs(ops - avg_ops) / avg_ops
-            
-            if deviation > deviation_threshold:
-                deviation_percent = deviation * 100
-                difference = "higher" if ops > avg_ops else "lower"
-                unstable_cores.append((physical_core_id, deviation_percent, difference))
-        
-        if unstable_cores:
-            text_widget.insert(tk.END, "\n⚠️ POTENTIAL INSTABILITY DETECTED\n", "warning")
-            text_widget.tag_configure("warning", foreground="red", font=('Consolas', 10, 'bold'))
-            for physical_core_id, deviation, difference in unstable_cores:
-                line = f"Core {physical_core_id}: {deviation:.2f}% {difference} than average\n"
-                text_widget.insert(tk.END, line)
-        else:
-            text_widget.insert(tk.END, "\n✅ All cores within 20% of mean performance\n", "good")
-            text_widget.tag_configure("good", foreground="green", font=('Consolas', 10, 'bold'))
