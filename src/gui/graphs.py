@@ -40,8 +40,8 @@ class BenchmarkGraphs:
         heavy_tab = ttk.Frame(notebook)
         summary_tab = ttk.Frame(notebook)
         
-        notebook.add(light_tab, text="Light Test Results")
-        notebook.add(heavy_tab, text="Heavy Test Results")
+        notebook.add(light_tab, text="SSE Test Results")
+        notebook.add(heavy_tab, text="AVX Test Results")
         notebook.add(summary_tab, text="Summary")
         
         # Extract progress data from benchmark results if available
@@ -58,10 +58,10 @@ class BenchmarkGraphs:
         
         # Add performance graphs
         if has_light_data:
-            self._create_performance_graph(light_tab, benchmark_results, 'light', "Light Load Performance Over Time")
+            self._create_performance_graph(light_tab, benchmark_results, 'light', "SSE Load Performance Over Time")
             
         if has_heavy_data:
-            self._create_performance_graph(heavy_tab, benchmark_results, 'heavy', "Heavy Load Performance Over Time")
+            self._create_performance_graph(heavy_tab, benchmark_results, 'heavy', "AVX Load Performance Over Time")
         
         # Create summary display
         self._create_summary_display(summary_tab, benchmark_results)
@@ -153,7 +153,19 @@ class BenchmarkGraphs:
                         color=color, 
                         marker='o', 
                         markersize=3)
-                
+                        
+                # Add core number label directly on the line
+                # Use the midpoint of the line to place the label
+                if len(time_points) > 0:
+                    mid_idx = len(time_points) // 2
+                    ax.text(time_points[mid_idx], perf_points[mid_idx], 
+                            str(physical_core_id),  # Just the number
+                            color=color, 
+                            fontweight='bold',
+                            ha='center', 
+                            va='center',
+                            bbox=dict(facecolor='white', alpha=0.7, edgecolor=color, pad=1))
+
                 # Highlight points outside the acceptable range with red circles
                 outlier_times = []
                 outlier_perfs = []
