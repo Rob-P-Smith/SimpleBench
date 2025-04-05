@@ -31,12 +31,15 @@ class MainWindow:
         
         # Test selection variables
         self.benchmark_type = tk.StringVar(value="light")  # Default to light benchmark
-        self.run_heavy_tests = tk.BooleanVar(value=True)
         self.run_multicore_tests = tk.BooleanVar(value=True)
         
         # New variables for SSE and AVX benchmarks
         self.run_sse_heavy_tests = tk.BooleanVar(value=False)
         self.run_avx_heavy_tests = tk.BooleanVar(value=False)
+
+        # New options for graphs and logging
+        self.display_graphs = tk.BooleanVar(value=True)
+        self.log_results = tk.BooleanVar(value=False)
         
         self._create_widgets()
         
@@ -66,7 +69,7 @@ class MainWindow:
         ttk.Label(duration_frame, text="Duration per core (1-30 sec):").pack(side=tk.LEFT, padx=5)
         
         # StringVar for validation
-        self.duration_var = tk.StringVar(value="10")
+        self.duration_var = tk.StringVar(value="1")
         
         # Create validation command
         vcmd = (self.root.register(self._validate_duration), '%P')
@@ -75,21 +78,25 @@ class MainWindow:
         self.duration_entry = ttk.Entry(duration_frame, width=5, textvariable=self.duration_var, validate='key', validatecommand=vcmd)
         self.duration_entry.pack(side=tk.LEFT)
         
-        # Create test selection frame
-        test_frame = ttk.LabelFrame(self.root, text="Test Selection", padding="10")
-        test_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Create benchmark configuration frame (renamed from Test Selection)
+        config_frame = ttk.LabelFrame(self.root, text="Benchmark Configuration", padding="10")
+        config_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Test type selection
-        test_type_frame = ttk.Frame(test_frame)
-        test_type_frame.pack(fill=tk.X, pady=5)
+        # Configure grid layout for the config frame
+        config_frame.columnconfigure(0, weight=1)  # Left column
+        config_frame.columnconfigure(1, weight=1)  # Right column
         
-        # Create benchmark type radio buttons frame
-        benchmark_type_frame = ttk.LabelFrame(test_frame, text="Benchmark Type", padding="5")
-        benchmark_type_frame.pack(fill=tk.X, pady=5, padx=5)
+        # Create benchmark type radio buttons frame - place on left side
+        benchmark_type_frame = ttk.LabelFrame(config_frame, text="Benchmark Type", padding="5")
+        benchmark_type_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=5)
         
         # Create radio buttons for benchmark types
         ttk.Radiobutton(benchmark_type_frame, text="SSE Simple Load (Basic Operations)", 
                     variable=self.benchmark_type, value="light").pack(anchor=tk.W, padx=10, pady=2)
+                    
+        # Add new radio button for heavy tests (replacing the checkbox)
+        ttk.Radiobutton(benchmark_type_frame, text="AVX Simple Load (Basic AVX Operations)", 
+                    variable=self.benchmark_type, value="heavy").pack(anchor=tk.W, padx=10, pady=2)
 
         ttk.Radiobutton(benchmark_type_frame, text="SSE-Heavy Load (SSE2 Vector Operations)", 
                     variable=self.benchmark_type, value="sse-heavy").pack(anchor=tk.W, padx=10, pady=2)
@@ -98,19 +105,27 @@ class MainWindow:
         ttk.Radiobutton(benchmark_type_frame, text="AVX-Heavy Load (AVX Vector Operations)", 
                     variable=self.benchmark_type, value="avx-heavy").pack(anchor=tk.W, padx=10, pady=2)
         
-        # Additional options frame
-        options_frame = ttk.LabelFrame(test_frame, text="Additional Options", padding="5")
-        options_frame.pack(fill=tk.X, pady=5, padx=5)
-        
-        # Heavy test checkbox
-        heavy_check = ttk.Checkbutton(options_frame, text="Run Heavy Load Tests", 
-                                     variable=self.run_heavy_tests)
-        heavy_check.pack(anchor=tk.W, padx=10, pady=2)
+        # Additional options frame - place on right side
+        options_frame = ttk.LabelFrame(config_frame, text="Additional Options", padding="5")
+        options_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=5)
         
         # Multi-core test checkbox
         multicore_check = ttk.Checkbutton(options_frame, text="Run Multi-Core Tests", 
                                          variable=self.run_multicore_tests)
         multicore_check.pack(anchor=tk.W, padx=10, pady=2)
+        
+        # Display graphs checkbox
+        display_graphs_check = ttk.Checkbutton(options_frame, text="Display Graphs", 
+                                         variable=self.display_graphs)
+        display_graphs_check.pack(anchor=tk.W, padx=10, pady=2)
+        
+        # Log results checkbox
+        log_results_check = ttk.Checkbutton(options_frame, text="Log Results", 
+                                         variable=self.log_results)
+        log_results_check.pack(anchor=tk.W, padx=10, pady=2)
+        
+        # Add some empty space for balance (in case more options are added later)
+        ttk.Label(options_frame, text="").pack(pady=5)
         
         # Create results view
         self.results_frame = ttk.Frame(self.root, padding="10")
@@ -134,15 +149,15 @@ class MainWindow:
         
         # Check benchmark selection
         benchmark_type = self.benchmark_type.get()
-        run_heavy = self.run_heavy_tests.get()
         
         # Set benchmark flags based on radio selection
         run_light_tests = benchmark_type == "light"
+        run_heavy_tests = benchmark_type == "heavy"  # Updated to use radio button value
         run_sse_heavy_tests = benchmark_type == "sse-heavy"
         run_avx_heavy_tests = benchmark_type == "avx-heavy"
         
         # Make sure at least one test type is selected
-        if not any([run_light_tests, run_heavy, run_sse_heavy_tests, run_avx_heavy_tests]):
+        if not any([run_light_tests, run_heavy_tests, run_sse_heavy_tests, run_avx_heavy_tests]):
             messagebox.showerror("Invalid Selection", "Please select at least one test type.")
             return
             
@@ -168,6 +183,7 @@ class MainWindow:
         
         # Get multi-core test option
         run_multicore = self.run_multicore_tests.get()
+        enable_logging = self.log_results.get()
         
         # Display selected tests
         self.results_view.clear()
@@ -176,15 +192,13 @@ class MainWindow:
         
         # Show selected benchmark type
         if run_light_tests:
-            self.results_view.add_message(f"  - Light Load Tests: Simple operations to measure basic performance")
+            self.results_view.add_message(f"  - SSE Simple Load: Basic operations to measure baseline performance")
+        elif run_heavy_tests:
+            self.results_view.add_message(f"  - AVX Simple Load: Basic AVX operations to stress the CPU")
         elif run_sse_heavy_tests:
-            self.results_view.add_message(f"  - SSE-Heavy Load Tests: Vector operations using SSE2 instructions")
+            self.results_view.add_message(f"  - SSE-Heavy Load: Vector operations using SSE2 instructions")
         elif run_avx_heavy_tests:
-            self.results_view.add_message(f"  - AVX-Heavy Load Tests: Vector operations using AVX instructions")
-            
-        # Show if heavy tests are selected
-        if run_heavy:
-            self.results_view.add_message(f"  - Heavy Load Tests: Vector operations to stress the CPU")
+            self.results_view.add_message(f"  - AVX-Heavy Load: Vector operations using AVX instructions")
             
         # Show if multi-core tests are selected
         if run_multicore:
@@ -202,10 +216,11 @@ class MainWindow:
                     completed_callback=self._benchmark_completed,
                     duration_per_core=duration,  # Pass the duration to the benchmark
                     run_light_tests=run_light_tests,
-                    run_heavy_tests=run_heavy,
+                    run_heavy_tests=run_heavy_tests,
                     run_sse_heavy_tests=run_sse_heavy_tests,
                     run_avx_heavy_tests=run_avx_heavy_tests,
-                    run_multicore_tests=run_multicore
+                    run_multicore_tests=run_multicore,
+                    enable_logging=enable_logging 
                 )
             except Exception as err:
                 # Use a local variable that won't cause closure problems
@@ -258,8 +273,8 @@ class MainWindow:
         self.duration_entry.config(state=tk.NORMAL)
         self.results_view.add_message("Benchmark completed.")
         
-        # Automatically show the results window with graphs
-        if hasattr(self.benchmark, 'results') and self.benchmark.results:
+        # Only show results window if display_graphs is checked
+        if self.display_graphs.get() and hasattr(self.benchmark, 'results') and self.benchmark.results:
             self.graphs.show_results(self.benchmark.results)
         
     def _handle_error(self, error_message):

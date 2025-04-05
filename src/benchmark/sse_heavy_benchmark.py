@@ -136,6 +136,10 @@ class SSEHeavyBenchmark:
         iterations = 0
         pi_values = []
         
+        # For periodic progress updates
+        last_update_time = start_time
+        update_interval = 0.4  # Update every 500ms
+        
         # Run until the duration is reached
         while self.controller._get_precise_time() < end_time and not self.stop_flag:
             # First run: SSE vector operations on arrays
@@ -152,17 +156,26 @@ class SSEHeavyBenchmark:
             # Count as one full iteration
             iterations += 1
             
-            # Every 10 iterations, update progress
-            if iterations % 10 == 0 and is_single_core:
-                elapsed = self.controller._get_precise_time() - start_time
-                remaining = max(0, duration - elapsed)
+            # Update progress at regular intervals (every 500ms)
+            current_time = self.controller._get_precise_time()
+            if is_single_core and (current_time - last_update_time) >= update_interval:
+                elapsed = current_time - start_time
+                
+                # Estimate operations per second
+                # Each iteration involves vector operations on arrays plus Pi calculation
+                # which includes many numerical operations
+                vector_ops_per_iteration = 1000 * 4  # BBP with 1000 terms * operations per term
+                total_ops = iterations * vector_ops_per_iteration
+                ops_per_sec = total_ops / elapsed if elapsed > 0 else 0
+                
+                # Format output to match light_benchmark style
+                physical_core_id = thread_id // 2  # Convert logical to physical core ID
                 if self.controller.progress_callback:
-                    # Calculate progress percentage
-                    progress_percent = min(99, int((elapsed / duration) * 100))
                     self.controller.progress_callback(
-                        f"SSE-Heavy Core {thread_id} benchmark: {progress_percent}% complete, "
-                        f"{remaining:.1f}s remaining"
+                        f"SSE int test, Core {physical_core_id}: {ops_per_sec:.2f} ops/sec (running for {elapsed:.2f}s)"
                     )
+                
+                last_update_time = current_time
         
         # Record elapsed time and operations
         actual_time = self.controller._get_precise_time() - start_time
@@ -174,7 +187,7 @@ class SSEHeavyBenchmark:
             'operations_per_second': iterations / actual_time if actual_time > 0 else 0,
             'pi_approximation': np.mean(pi_values) if pi_values else 0
         }
-    
+
     def run_single_core_test(self, core_id, duration):
         """Run the SSE-Heavy benchmark on a single core.
         

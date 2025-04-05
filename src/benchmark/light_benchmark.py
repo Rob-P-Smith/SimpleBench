@@ -42,6 +42,10 @@ class LightBenchmark:
         
         # Initialize progress data collection
         progress_data = []
+
+        # For periodic progress updates
+        last_update_time = start_time
+        update_interval = 0.4  # Update every 0.4 seconds
         
         # Execute simple integer operations that will use SSE2
         while current_time < end_time and not self.parent._stop_event.is_set():
@@ -53,9 +57,9 @@ class LightBenchmark:
             
             iterations += 1
             
-            # Update time and log progress periodically
-            if iterations % 100000 == 0:
-                current_time = get_time()
+            # Update time and check if it's time to log progress
+            current_time = get_time()
+            if current_time - last_update_time >= update_interval:
                 elapsed = current_time - start_time
                 if elapsed > 0:
                     ops_per_sec = (iterations * ops_per_iteration) / elapsed
@@ -67,9 +71,12 @@ class LightBenchmark:
                         'operations_per_second': ops_per_sec
                     })
                     
+                    # Update the last update time
+                    last_update_time = current_time
+                    
                     # Check time after measurement
-                    current_time = get_time()
-        
+                    current_time = get_time()        
+
         # Collect final performance data
         win32pdh.CollectQueryData(self.parent.perf_counters[core_id]['query'])
         counter_value = win32pdh.GetFormattedCounterValue(
@@ -162,6 +169,10 @@ class LightBenchmark:
                 'int_ops_per_iteration': ops_per_iteration
             }
             
+            # For periodic progress updates
+            last_update_time = start_time
+            update_interval = 0.4  # Update every 0.4 seconds
+
             # Integer SSE2 load test implementation
             while not stop_event.is_set():
                 # Simple integer vector operations using SSE2
@@ -172,15 +183,15 @@ class LightBenchmark:
                 
                 iterations += 1
                 
-                # Every 100K iterations, update progress
-                if iterations % 100000 == 0:
-                    current_time = get_time()
+                # Check if it's time to update progress
+                current_time = get_time()
+                if current_time - last_update_time >= update_interval:
                     elapsed = current_time - start_time
                     if elapsed > 0:
                         ops_per_sec = (iterations * ops_per_iteration) / elapsed
                         
                         with log_lock:
-                            log(f"MT SSE test, Thread {thread_id}: {ops_per_sec:.2f} ops/sec")
+                            log(f"MT SSE test, Thread {thread_id}: {ops_per_sec:.2f} ops/sec (running for {elapsed:.2f}s)")
                         
                         # Record progress data point with overall elapsed time
                         with progress_lock:
@@ -190,6 +201,9 @@ class LightBenchmark:
                                 'thread_id': thread_id,
                                 'operations_per_second': ops_per_sec
                             })
+                        
+                        # Update the last update time
+                        last_update_time = current_time
             
             # Record final statistics
             end_time = get_time()

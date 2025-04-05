@@ -40,6 +40,10 @@ class HeavyBenchmark:
         end_time = start_time + duration
         current_time = start_time
         
+        # For periodic progress updates
+        last_update_time = start_time
+        update_interval = 0.4  # Update every 0.4 seconds
+        
         # Execute AVX operations to stress the CPU
         while current_time < end_time and not self.parent._stop_event.is_set():
             # Chain of vector operations to fully utilize AVX units
@@ -53,9 +57,11 @@ class HeavyBenchmark:
             
             iterations += 1
             
-            # Update progress every few iterations
-            if iterations % 100 == 0:  # Reduced frequency due to heavier workload
-                current_time = get_time()
+            # Update time
+            current_time = get_time()
+            
+            # Update progress based on time interval instead of iteration count
+            if current_time - last_update_time >= update_interval:
                 elapsed = current_time - start_time
                 if elapsed > 0:
                     ops_per_sec = (iterations * vector_ops) / elapsed
@@ -67,8 +73,8 @@ class HeavyBenchmark:
                         'operations_per_second': ops_per_sec
                     })
                     
-                    # Check time after measurement
-                    current_time = get_time()
+                    # Update the last update time
+                    last_update_time = current_time
         
         # Collect final performance data
         win32pdh.CollectQueryData(self.parent.perf_counters[core_id]['query'])
@@ -160,6 +166,10 @@ class HeavyBenchmark:
             start_time = get_time()
             iterations = 0
             thread_result = {'thread_id': thread_id, 'iterations': 0}
+
+            # For periodic progress updates
+            last_update_time = start_time
+            update_interval = 0.4  # Update every 0.4 seconds
             
             while not stop_event.is_set():
                 # Chain of vector operations to fully utilize AVX units
@@ -172,15 +182,15 @@ class HeavyBenchmark:
                 
                 iterations += 1
                 
-                # Every few iterations, update progress
-                if iterations % 100 == 0:  # Reduced frequency due to heavier workload
-                    current_time = get_time()
+                # Update progress based on time interval instead of iteration count
+                current_time = get_time()
+                if current_time - last_update_time >= update_interval:
                     elapsed = current_time - start_time
                     if elapsed > 0:
                         ops_per_sec = (iterations * vector_ops) / elapsed
                         
                         with log_lock:
-                            log(f"MT AVX test, Thread {thread_id}: {ops_per_sec:.2f} vector ops/sec")
+                            log(f"MT AVX test, Thread {thread_id}: {ops_per_sec:.2f} vector ops/sec (running for {elapsed:.2f}s)")
                         
                         # Record progress data point with overall elapsed time
                         with progress_lock:
@@ -190,7 +200,10 @@ class HeavyBenchmark:
                                 'thread_id': thread_id,
                                 'operations_per_second': ops_per_sec
                             })
-        
+                        
+                        # Update the last update time
+                        last_update_time = current_time
+
             # Record final statistics
             end_time = get_time()
             elapsed = end_time - start_time

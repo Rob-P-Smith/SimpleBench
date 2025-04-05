@@ -30,6 +30,8 @@ from src.benchmark.heavy_benchmark import HeavyBenchmark
 from src.benchmark.sse_heavy_benchmark import SSEHeavyBenchmark
 from src.benchmark.avx_heavy_benchmark import AVXHeavyBenchmark
 from src.utils.hpet_timer import HPETTimer
+from src.utils.file_handler import create_log_file, save_results_to_file
+
 
 class CPUBenchmark:
     def __init__(self):
@@ -76,9 +78,36 @@ class CPUBenchmark:
             print(f"Warning: Could not initialize HPET: {e}")
             return False
     
+    # Remove the _initialize_log_file method and replace it with this:
+    def _initialize_log_file(self):
+        """Initialize the log file with header information."""
+        try:
+            # Create a new log file using the file_handler
+            self.log_filename = create_log_file()
+            
+            # Open the log file for appending throughout the benchmark
+            self.log_file = open(self.log_filename, "a")
+            
+            self._log(f"Log file initialized: {os.path.abspath(self.log_filename)}")
+            return True
+        except Exception as e:
+            print(f"Error creating log file: {str(e)}")
+            self.enable_logging = False
+            return False
+
     def _log(self, message):
-        """Log a message using the progress callback if available."""
-        print(message)  # Always print to console
+        """Log a message to the console and log file."""
+        print(message)
+        
+        # Only write to log file if logging is enabled
+        if hasattr(self, 'enable_logging') and self.enable_logging and hasattr(self, 'log_file'):
+            try:
+                self.log_file.write(message + '\n')
+                self.log_file.flush()
+            except Exception:
+                pass  # Ignore errors writing to log file
+                
+        # Call progress callback if available
         if self.progress_callback:
             self.progress_callback(message)
 
@@ -249,8 +278,8 @@ class CPUBenchmark:
                 pass
 
     def start(self, progress_callback=None, completed_callback=None, duration_per_core=10,
-          run_light_tests=True, run_heavy_tests=True, run_sse_heavy_tests=True, 
-          run_avx_heavy_tests=True, run_multicore_tests=True):
+             run_light_tests=True, run_heavy_tests=False, run_sse_heavy_tests=False, 
+             run_avx_heavy_tests=False, run_multicore_tests=True, enable_logging=True):
         """Start the benchmark process."""
         if self.running:
             return False
@@ -261,13 +290,13 @@ class CPUBenchmark:
         self.completed_callback = completed_callback
         self.results = {}
         
-        # Initialize log file with header
-        try:
-            with open(self.log_filename, "w") as f:
-                f.write(f"CPU BENCHMARK LOG - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write("-" * 60 + "\n\n")
-        except Exception as e:
-            self._log(f"Error creating log file: {str(e)}")
+        # Initialize log file if logging is enabled
+        self.enable_logging = enable_logging
+        if enable_logging:
+            self._initialize_log_file()
+        else:
+            # Set up a dummy log file attribute to avoid errors
+            self.log_file = None
         
         # Start benchmark in a separate thread
         self._benchmark_thread = threading.Thread(
@@ -279,7 +308,7 @@ class CPUBenchmark:
         self._benchmark_thread.start()
         
         return True
-
+    
     def _run_benchmark(self, duration_per_core, run_light_tests, run_heavy_tests, 
                        run_sse_heavy_tests, run_avx_heavy_tests, run_multicore_tests):
         """Run the benchmark suite with the specified options."""
@@ -322,6 +351,13 @@ class CPUBenchmark:
         except Exception as e:
             self._log(f"Error during benchmark: {str(e)}")
         finally:
+            # Close log file if it was opened
+            if self.enable_logging and hasattr(self, 'log_file') and self.log_file:
+                try:
+                    self.log_file.close()
+                except Exception:
+                    pass
+                    
             self.running = False
             if self.completed_callback:
                 self.completed_callback()
@@ -474,6 +510,14 @@ class CPUBenchmark:
         """Stop the benchmark process."""
         self._stop_event.set()
         self._log("Benchmark stopping...")
+        
+        # Close log file if it was opened
+        if hasattr(self, 'enable_logging') and self.enable_logging and hasattr(self, 'log_file') and self.log_file:
+            try:
+                self.log_file.close()
+            except Exception:
+                pass
+                
         return True
 
     def _summarize_results(self):
@@ -483,26 +527,29 @@ class CPUBenchmark:
             return
             
         try:
-            # Check if we have valid results for light and heavy tests
-            light_results = {}
-            heavy_results = {}
+            # Test types we want to collect results for
+            test_types = ['light', 'heavy', 'sse-heavy', 'avx-heavy']
+            test_results = {}
             
-            for core_id, data in self.results.items():
-                if core_id == 'multithreaded':
-                    continue  # Skip multithreaded results for now
+            # Collect results for each test type
+            for test_type in test_types:
+                test_results[test_type] = {}
+                for core_id, data in self.results.items():
+                    if core_id == 'multithreaded':
+                        continue  # Skip multithreaded results for now
                     
-                if 'light' in data and isinstance(data['light'], dict) and 'operations_per_second' in data['light']:
-                    light_results[core_id] = data['light']
-                
-                if 'heavy' in data and isinstance(data['heavy'], dict) and 'operations_per_second' in data['heavy']:
-                    heavy_results[core_id] = data['heavy']
+                    if (test_type in data and isinstance(data[test_type], dict) 
+                            and 'operations_per_second' in data[test_type]):
+                        test_results[test_type][core_id] = data[test_type]
             
             # Calculate maximum width for formatting
             max_width = max(
-                60,  # Increased minimum width
+                60,  # Minimum width
                 len("CPU BENCHMARK RESULTS SUMMARY"),
                 len("LIGHT LOAD TEST RESULTS (Simple Operations)"),
                 len("HEAVY LOAD TEST RESULTS (AVX Vector Operations)"),
+                len("SSE-HEAVY LOAD TEST RESULTS (SSE Vector Operations)"),
+                len("AVX-HEAVY LOAD TEST RESULTS (Advanced AVX Vector Operations)"),
                 len("MULTI-THREADED TEST RESULTS")
             )
             
@@ -514,15 +561,18 @@ class CPUBenchmark:
             title = "CPU BENCHMARK RESULTS SUMMARY"
             self._log(f"| {title.center(max_width)} |")
             
-            # Summarize light load test results
-            if light_results:
-                self._summarize_test_results("LIGHT LOAD TEST RESULTS (Simple Operations)", 
-                                        light_results, max_width)
+            # Summarize results for each test type with descriptive headers
+            test_headers = {
+                'light': "LIGHT LOAD TEST RESULTS (Simple Operations)",
+                'heavy': "HEAVY LOAD TEST RESULTS (AVX Vector Operations)",
+                'sse-heavy': "SSE-HEAVY LOAD TEST RESULTS (SSE Vector Operations)",
+                'avx-heavy': "AVX-HEAVY LOAD TEST RESULTS (Advanced AVX Vector Operations)"
+            }
             
-            # Summarize heavy load test results
-            if heavy_results:
-                self._summarize_test_results("HEAVY LOAD TEST RESULTS (AVX Vector Operations)", 
-                                        heavy_results, max_width)
+            # Display results for each test type
+            for test_type, header in test_headers.items():
+                if test_results[test_type]:
+                    self._summarize_test_results(header, test_results[test_type], max_width, test_type)
             
             # Summarize multi-threaded test results if available
             if 'multithreaded' in self.results:
@@ -532,72 +582,107 @@ class CPUBenchmark:
             self._log(border)
             
             # Add log file location
-            self._log(f"\nBenchmark log file: {os.path.abspath(self.log_filename)}")
+            if hasattr(self, 'enable_logging') and self.enable_logging:
+                self._log(f"\nBenchmark log file: {os.path.abspath(self.log_filename)}")
+            
+            # Save parsed results to results directory if logging is enabled
+            if hasattr(self, 'enable_logging') and self.enable_logging:
+                try:
+                    # Format results for saving as a clean summary
+                    formatted_results = []
+                    formatted_results.append(f"CPU BENCHMARK RESULTS SUMMARY - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    formatted_results.append("=" * 80)
+                    formatted_results.append("")
+                    
+                    # System information 
+                    formatted_results.append("SYSTEM INFORMATION")
+                    formatted_results.append("-" * 20)
+                    formatted_results.append(f"CPU cores: {self.cpu_cores} physical, {self.cpu_count} logical")
+                    formatted_results.append("")
+                    
+                    # Add summary for each test type
+                    for test_type, header in test_headers.items():
+                        if test_results[test_type]:
+                            formatted_results.append(header)
+                            formatted_results.append("-" * len(header))
+                            
+                            # Calculate statistics
+                            ops_per_sec_values = [r['operations_per_second'] for r in test_results[test_type].values()]
+                            avg_ops = sum(ops_per_sec_values) / len(test_results[test_type])
+                            max_ops = max(ops_per_sec_values)
+                            min_ops = min(ops_per_sec_values)
+                            
+                            # Determine appropriate unit based on test type
+                            unit = "ops/sec"
+                            if test_type in ['heavy', 'sse-heavy', 'avx-heavy']:
+                                unit = "vector ops/sec"
+                            
+                            # Add average performance
+                            formatted_results.append(f"Average {unit} per core: {avg_ops:.2f}")
+                            formatted_results.append(f"Maximum {unit}: {max_ops:.2f}")
+                            formatted_results.append(f"Minimum {unit}: {min_ops:.2f}")
+                            formatted_results.append("")
+                            
+                            # Add core ranking
+                            formatted_results.append("CORE PERFORMANCE RANKING (Higher is Better)")
+                            
+                            # Rank cores by performance
+                            ranked_cores = sorted(
+                                [(core_id, data['operations_per_second']) for core_id, data in test_results[test_type].items()],
+                                key=lambda x: x[1], 
+                                reverse=True
+                            )
+                            
+                            # List cores ranked by performance
+                            for i, (logical_core_id, ops) in enumerate(ranked_cores):
+                                rank = i + 1
+                                physical_core_id = logical_core_id // 2
+                                deviation_pct = (ops/avg_ops - 1) * 100
+                                formatted_results.append(f"Core {physical_core_id}: {ops:.2f} {unit}  #{rank}  ({deviation_pct:+.2f}% from mean)")
+                            
+                            formatted_results.append("")
+                    
+                    # Add multi-threaded results if available
+                    if 'multithreaded' in self.results:
+                        formatted_results.append("MULTI-THREADED TEST RESULTS")
+                        formatted_results.append("-" * 30)
+                        
+                        for test_type, test_header, ops_unit in [
+                            ('light', 'Light Load Multi-Threaded Test:', 'ops/sec'),
+                            ('heavy', 'Heavy Load (AVX) Multi-Threaded Test:', 'vector ops/sec'),
+                            ('sse-heavy', 'SSE-Heavy Load Multi-Threaded Test:', 'vector ops/sec'),
+                            ('avx-heavy', 'AVX-Heavy Load Multi-Threaded Test:', 'vector ops/sec')
+                        ]:
+                            if test_type in self.results['multithreaded']:
+                                result = self.results['multithreaded'][test_type]
+                                formatted_results.append(f"{test_header}")
+                                formatted_results.append(f"  Threads: {result['thread_count']}")
+                                formatted_results.append(f"  Overall performance: {result['operations_per_second']:,.2f} {ops_unit}")
+                                
+                                # Calculate scaling efficiency if we have single-core results
+                                if any(k != 'multithreaded' for k in self.results.keys()):
+                                    single_core_results = [data[test_type]['operations_per_second'] 
+                                                        for core_id, data in self.results.items() 
+                                                        if core_id != 'multithreaded' and test_type in data]
+                                    if single_core_results:
+                                        single_core_avg = sum(single_core_results) / len(single_core_results)
+                                        scaling_ratio = result['operations_per_second'] / (single_core_avg * result['thread_count'])
+                                        formatted_results.append(f"  Scaling efficiency: {scaling_ratio*100:.1f}%")
+                                
+                                formatted_results.append("")
+                    
+                    # Save the formatted results to results directory
+                    from src.utils.file_handler import save_results_to_file
+                    results_filename = f"benchmark_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                    results_path = save_results_to_file(formatted_results, results_filename)
+                    self._log(f"Benchmark results summary saved to: {os.path.abspath(results_path)}")
+                    
+                except Exception as e:
+                    self._log(f"Error saving results to file: {str(e)}")
         
         except Exception as e:
             self._log(f"Error summarizing results: {str(e)}")
-
-    def _summarize_multithreaded_results(self, max_width):
-        """Summarize results for multi-threaded tests."""
-        mt_results = self.results.get('multithreaded', {})
-        if not mt_results:
-            return
-        
-        # Divider line
-        self._log("|" + "-" * (max_width + 2) + "|")
-        
-        # Header for multi-threaded tests
-        self._log(f"| {'MULTI-THREADED TEST RESULTS'.center(max_width)} |")
-        
-        # Divider line
-        self._log("|" + "-" * (max_width + 2) + "|")
-        
-        # Light load multi-threaded results
-        if 'light' in mt_results:
-            light = mt_results['light']
-            self._log(f"| {'Light Load Multi-Threaded Test:'.center(max_width)} |")
-            self._log(f"| Threads: {light['thread_count']}".ljust(max_width + 2) + " |")
-            self._log(f"| Total operations: {light['total_iterations']:,}".ljust(max_width + 2) + " |")
-            self._log(f"| Time: {light['elapsed_seconds']:.2f} seconds".ljust(max_width + 2) + " |")
-            self._log(f"| Overall performance: {light['operations_per_second']:,.2f} ops/sec".ljust(max_width + 2) + " |")
-            self._log(f"| Per-thread average: {light['operations_per_second']/light['thread_count']:,.2f} ops/sec".ljust(max_width + 2) + " |")
-            
-            # If we have single-core results, calculate scaling efficiency
-            single_core_avg = 0
-            if any(k != 'multithreaded' for k in self.results.keys()):
-                single_core_results = [data['light']['operations_per_second'] 
-                                    for core_id, data in self.results.items() 
-                                    if core_id != 'multithreaded' and 'light' in data]
-                if single_core_results:
-                    single_core_avg = sum(single_core_results) / len(single_core_results)
-                    scaling_ratio = light['operations_per_second'] / (single_core_avg * light['thread_count'])
-                    self._log(f"| Scaling efficiency: {scaling_ratio*100:.1f}%".ljust(max_width + 2) + " |")
-            
-            self._log("|" + "-" * (max_width + 2) + "|")
-        
-        # Heavy load multi-threaded results
-        if 'heavy' in mt_results:
-            heavy = mt_results['heavy']
-            self._log(f"| {'Heavy Load (AVX) Multi-Threaded Test:'.center(max_width)} |")
-            self._log(f"| Threads: {heavy['thread_count']}".ljust(max_width + 2) + " |")
-            total_ops = sum(r.get('total_ops', r.get('iterations', 0)) for r in heavy['thread_results'])
-            self._log(f"| Total vector operations: {total_ops:,}".ljust(max_width + 2) + " |")
-            self._log(f"| Time: {heavy['elapsed_seconds']:.2f} seconds".ljust(max_width + 2) + " |")
-            self._log(f"| Overall performance: {heavy['operations_per_second']:,.2f} vector ops/sec".ljust(max_width + 2) + " |")
-            self._log(f"| Per-thread average: {heavy['operations_per_second']/heavy['thread_count']:,.2f} vector ops/sec".ljust(max_width + 2) + " |")
-            
-            # If we have single-core results, calculate scaling efficiency
-            single_core_avg = 0
-            if any(k != 'multithreaded' for k in self.results.keys()):
-                single_core_results = [data['heavy']['operations_per_second'] 
-                                    for core_id, data in self.results.items() 
-                                    if core_id != 'multithreaded' and 'heavy' in data]
-                if single_core_results:
-                    single_core_avg = sum(single_core_results) / len(single_core_results)
-                    scaling_ratio = heavy['operations_per_second'] / (single_core_avg * heavy['thread_count'])
-                    self._log(f"| Scaling efficiency: {scaling_ratio*100:.1f}%".ljust(max_width + 2) + " |")
-    
-    def _summarize_test_results(self, header, results, max_width):
+    def _summarize_test_results(self, header, results, max_width, test_type='light'):
         """Summarize results for a specific test type."""
         # Divider line
         self._log("|" + "-" * (max_width + 2) + "|")
@@ -614,10 +699,15 @@ class CPUBenchmark:
         max_ops = max(ops_per_sec_values)
         min_ops = min(ops_per_sec_values)
         
+        # Determine appropriate unit based on test type
+        unit = "ops/sec"
+        if test_type in ['heavy', 'sse-heavy', 'avx-heavy']:
+            unit = "vector ops/sec"
+        
         # Average performance
-        self._log(f"| Average ops/sec per core: {avg_ops:.2f}".ljust(max_width + 2) + " |")
-        self._log(f"| Maximum ops/sec: {max_ops:.2f}".ljust(max_width + 2) + " |")
-        self._log(f"| Minimum ops/sec: {min_ops:.2f}".ljust(max_width + 2) + " |")
+        self._log(f"| Average {unit} per core: {avg_ops:.2f}".ljust(max_width + 2) + " |")
+        self._log(f"| Maximum {unit}: {max_ops:.2f}".ljust(max_width + 2) + " |")
+        self._log(f"| Minimum {unit}: {min_ops:.2f}".ljust(max_width + 2) + " |")
         
         # Divider line
         self._log("|" + "-" * (max_width + 2) + "|")
@@ -639,7 +729,7 @@ class CPUBenchmark:
             physical_core_id = logical_core_id // 2  # Convert logical to physical core ID
             deviation_pct = (ops/avg_ops - 1) * 100
             # Simplified core display format:
-            line = f"Core {physical_core_id}: {ops:.2f} ops/sec  #{rank}  ({deviation_pct:+.2f}% from mean)"
+            line = f"Core {physical_core_id}: {ops:.2f} {unit}  #{rank}  ({deviation_pct:+.2f}% from mean)"
             self._log(f"| {line.ljust(max_width)} |")
         
         # Check for cores with performance deviation > 20% from mean
@@ -667,3 +757,57 @@ class CPUBenchmark:
             self._log("|" + "-" * (max_width + 2) + "|")
         else:
             self._log(f"| {'✅ All cores within 20% of mean performance'.center(max_width)} |")
+
+    def _summarize_multithreaded_results(self, max_width):
+        """Summarize results for multi-threaded tests."""
+        mt_results = self.results.get('multithreaded', {})
+        if not mt_results:
+            return
+        
+        # Divider line
+        self._log("|" + "-" * (max_width + 2) + "|")
+        
+        # Header for multi-threaded tests
+        self._log(f"| {'MULTI-THREADED TEST RESULTS'.center(max_width)} |")
+        
+        # Divider line
+        self._log("|" + "-" * (max_width + 2) + "|")
+        
+        # Process each test type with consistent formatting
+        test_types = [
+            ('light', 'Light Load Multi-Threaded Test:', 'ops/sec'),
+            ('heavy', 'Heavy Load (AVX) Multi-Threaded Test:', 'vector ops/sec'),
+            ('sse-heavy', 'SSE-Heavy Load Multi-Threaded Test:', 'vector ops/sec'),
+            ('avx-heavy', 'AVX-Heavy Load Multi-Threaded Test:', 'vector ops/sec')
+        ]
+        
+        for test_type, test_header, ops_unit in test_types:
+            if test_type in mt_results:
+                result = mt_results[test_type]
+                self._log(f"| {test_header.center(max_width)} |")
+                self._log(f"| Threads: {result['thread_count']}".ljust(max_width + 2) + " |")
+                
+                # Handle different result formats consistently
+                if 'total_iterations' in result:
+                    self._log(f"| Total operations: {result['total_iterations']:,}".ljust(max_width + 2) + " |")
+                elif 'total_operations' in result:
+                    self._log(f"| Total operations: {result['total_operations']:,}".ljust(max_width + 2) + " |")
+                elif 'thread_results' in result:
+                    total_ops = sum(r.get('total_ops', r.get('iterations', 0)) for r in result['thread_results'])
+                    self._log(f"| Total vector operations: {total_ops:,}".ljust(max_width + 2) + " |")
+                
+                self._log(f"| Time: {result['elapsed_seconds']:.2f} seconds".ljust(max_width + 2) + " |")
+                self._log(f"| Overall performance: {result['operations_per_second']:,.2f} {ops_unit}".ljust(max_width + 2) + " |")
+                self._log(f"| Per-thread average: {result['operations_per_second']/result['thread_count']:,.2f} {ops_unit}".ljust(max_width + 2) + " |")
+                
+                # Calculate scaling efficiency if we have single-core results
+                if any(k != 'multithreaded' for k in self.results.keys()):
+                    single_core_results = [data[test_type]['operations_per_second'] 
+                                        for core_id, data in self.results.items() 
+                                        if core_id != 'multithreaded' and test_type in data]
+                    if single_core_results:
+                        single_core_avg = sum(single_core_results) / len(single_core_results)
+                        scaling_ratio = result['operations_per_second'] / (single_core_avg * result['thread_count'])
+                        self._log(f"| Scaling efficiency: {scaling_ratio*100:.1f}%".ljust(max_width + 2) + " |")
+                
+                self._log("|" + "-" * (max_width + 2) + "|")
