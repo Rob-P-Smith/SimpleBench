@@ -120,19 +120,38 @@ class CPUBenchmark:
         
     def _init_perf_counters(self):
         """Initialize performance counters for each CPU core."""
+        success = False
         try:
+            # Try to refresh the counter list
+            win32pdh.EnumObjects(None, None, 0, 1)
+            
             for i in range(self.cpu_count):
                 counter_path = f"\\Processor({i})\\% Processor Time"
                 self.perf_counters[i] = {}
                 self.perf_counters[i]['query'] = win32pdh.OpenQuery()
-                self.perf_counters[i]['counter'] = win32pdh.AddCounter(
-                    self.perf_counters[i]['query'], 
-                    counter_path
-                )
-                
-            self._log(f"Initialized performance counters for {self.cpu_count} logical processors")
+                try:
+                    self.perf_counters[i]['counter'] = win32pdh.AddCounter(
+                        self.perf_counters[i]['query'], 
+                        counter_path
+                    )
+                    # Try to collect data once to ensure it's working
+                    win32pdh.CollectQueryData(self.perf_counters[i]['query'])
+                    success = True
+                except Exception as e:
+                    self._log(f"Warning: Could not initialize performance counter for core {i}: {str(e)}")
+                    # Set up a dummy counter
+                    self.perf_counters[i]['counter'] = None
+                    
+            if success:
+                self._log(f"Initialized performance counters for {self.cpu_count} logical processors")
+            else:
+                self._log("Failed to initialize any performance counters")
         except Exception as e:
             self._log(f"Error initializing performance counters: {str(e)}")
+            # Make sure all cores have at least empty counter entries
+            for i in range(self.cpu_count):
+                if i not in self.perf_counters:
+                    self.perf_counters[i] = {'query': None, 'counter': None}
 
     def _identify_physical_cores(self):
         """Identify physical cores in the system."""
