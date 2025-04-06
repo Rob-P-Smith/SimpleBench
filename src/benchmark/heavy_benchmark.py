@@ -3,24 +3,19 @@ import threading
 import psutil
 import win32pdh
 import numpy as np
+from src.benchmark.all_benchmark import AllBenchmark
 
-class HeavyBenchmark:
+class HeavyBenchmark(AllBenchmark):
     """Handles AVX benchmark tests (vector operations)."""
     
     def __init__(self, parent_benchmark):
         """Initialize with a reference to the parent benchmark."""
-        self.parent = parent_benchmark
+        super().__init__(parent_benchmark)
         
     def run_single_core_test(self, core_id, duration=10):
         """Run AVX test on a single core."""
-        physical_core_id = core_id // 2  # Calculate physical core ID
-        
-        # Use parent's logging and timing functions
-        log = self.parent._log
-        get_time = self.parent._get_precise_time
-        
-        # Collect initial performance data
-        win32pdh.CollectQueryData(self.parent.perf_counters[core_id]['query'])
+        # Use base class to prepare test
+        physical_core_id, progress_data, start_time = self.prepare_single_core_test(core_id, "heavy AVX load")
         
         # Prepare arrays for AVX operations - larger arrays for more stress
         array_size = 4000  # Increased array size for more intensive vector operations
@@ -30,13 +25,9 @@ class HeavyBenchmark:
         d = np.random.random(array_size).astype(np.float32)
         e = np.random.random(array_size).astype(np.float32)
         
-        # Initialize progress data collection
-        progress_data = []
-        
         # Prepare for a workload benchmark
         iterations = 0
         vector_ops = array_size * 15  # Each iteration now does multiple vector operations
-        start_time = get_time()
         end_time = start_time + duration
         current_time = start_time
         
@@ -58,87 +49,36 @@ class HeavyBenchmark:
             iterations += 1
             
             # Update time
-            current_time = get_time()
+            current_time = self._get_precise_time()
             
             # Update progress based on time interval instead of iteration count
             if current_time - last_update_time >= update_interval:
                 elapsed = current_time - start_time
                 if elapsed > 0:
                     ops_per_sec = (iterations * vector_ops) / elapsed
-                    log(f"AVX test, Core {physical_core_id}: {ops_per_sec:.2f} vector ops/sec (running for {elapsed:.2f}s)")
+                    # Use standardized logging
+                    self.log_test_progress(core_id, "AVX", ops_per_sec, elapsed)
                     
-                    # Store progress data point for graphing
-                    progress_data.append({
-                        'elapsed_seconds': elapsed,
-                        'operations_per_second': ops_per_sec
-                    })
+                    # Store progress data point
+                    self.collect_progress_data(progress_data, elapsed, ops_per_sec)
                     
                     # Update the last update time
                     last_update_time = current_time
         
-        # Collect final performance data
-        win32pdh.CollectQueryData(self.parent.perf_counters[core_id]['query'])
-        counter_value = win32pdh.GetFormattedCounterValue(
-            self.parent.perf_counters[core_id]['counter'], 
-            win32pdh.PDH_FMT_DOUBLE
+        # Use base class to finalize results
+        return self.finalize_single_core_result(
+            core_id, start_time, iterations, vector_ops, 
+            progress_data, "AVX", "vector ops"
         )
-        
-        # Calculate results
-        elapsed = get_time() - start_time
-        result = {}
-        
-        if elapsed > 0:
-            ops_per_sec = (iterations * vector_ops) / elapsed
-            cpu_usage = counter_value[1]  # Extract the actual counter value
-            
-            # Add final data point if it's after the last one
-            if progress_data and elapsed > progress_data[-1]['elapsed_seconds']:
-                progress_data.append({
-                    'elapsed_seconds': elapsed,
-                    'operations_per_second': ops_per_sec
-                })
-            
-            result = {
-                'iterations': iterations,
-                'vector_ops': vector_ops,
-                'total_ops': iterations * vector_ops,
-                'elapsed_seconds': elapsed,
-                'operations_per_second': ops_per_sec,
-                'cpu_usage_percent': cpu_usage,
-                'progress': progress_data  # Add progress data to result
-            }
-            
-            log(f"AVX load test on Core {physical_core_id} complete:")
-            log(f"  Vector operations: {iterations * vector_ops}")
-            log(f"  Time: {elapsed:.2f} seconds")
-            log(f"  Performance: {ops_per_sec:.2f} vector ops/sec")
-            log(f"  CPU Usage: {cpu_usage:.2f}%")
-            log(f"  Progress data points: {len(progress_data)}")
-            
-        return result
         
     def run_multithreaded_test(self, duration=10):
         """Run a multi-threaded AVX test using all available cores."""
-        log = self.parent._log
-        get_time = self.parent._get_precise_time
+        # Set up multithreaded test using base class
+        thread_results, progress_data, stop_event, log_lock, progress_lock, overall_start = \
+            self.setup_multithreaded_test("AVX")
+        
+        # Get CPU count from parent
         cpu_count = self.parent.cpu_count
-        
-        log(f"Starting multi-threaded AVX test with {cpu_count} threads...")
-        
-        # Create a shared stop event for all threads
-        stop_event = threading.Event()
-        
-        # Create a list to hold results from each thread
-        thread_results = []
-        threads = []
-        
-        # Create locks for thread-safe operations
-        log_lock = threading.Lock()
-        progress_lock = threading.Lock()
-        
-        # Shared progress data
-        overall_start = get_time()
-        progress_data = []
         
         # Function that will run in each thread
         def thread_func(thread_id):
@@ -163,7 +103,7 @@ class HeavyBenchmark:
             # Each iteration now does many more vector operations
             vector_ops = array_size * 15
             
-            start_time = get_time()
+            start_time = self._get_precise_time()
             iterations = 0
             thread_result = {'thread_id': thread_id, 'iterations': 0}
 
@@ -183,29 +123,28 @@ class HeavyBenchmark:
                 iterations += 1
                 
                 # Update progress based on time interval instead of iteration count
-                current_time = get_time()
+                current_time = self._get_precise_time()
                 if current_time - last_update_time >= update_interval:
                     elapsed = current_time - start_time
                     if elapsed > 0:
                         ops_per_sec = (iterations * vector_ops) / elapsed
                         
                         with log_lock:
-                            log(f"MT AVX test, Thread {thread_id}: {ops_per_sec:.2f} vector ops/sec (running for {elapsed:.2f}s)")
+                            # Use standardized logging
+                            self.log_test_progress(thread_id, "AVX", ops_per_sec, elapsed, is_thread=True)
                         
                         # Record progress data point with overall elapsed time
                         with progress_lock:
                             elapsed_since_start = current_time - overall_start
-                            progress_data.append({
-                                'elapsed_seconds': elapsed_since_start,
-                                'thread_id': thread_id,
-                                'operations_per_second': ops_per_sec
-                            })
+                            progress_data.append(
+                                self.create_thread_progress_data(thread_id, elapsed_since_start, ops_per_sec)
+                            )
                         
                         # Update the last update time
                         last_update_time = current_time
 
             # Record final statistics
-            end_time = get_time()
+            end_time = self._get_precise_time()
             elapsed = end_time - start_time
             
             thread_result['iterations'] = iterations
@@ -217,61 +156,32 @@ class HeavyBenchmark:
             # Record final data point
             with progress_lock:
                 elapsed_since_start = end_time - overall_start
-                progress_data.append({
-                    'elapsed_seconds': elapsed_since_start,
-                    'thread_id': thread_id,
-                    'operations_per_second': (iterations * vector_ops) / elapsed
-                })
+                progress_data.append(
+                    self.create_thread_progress_data(thread_id, elapsed_since_start, 
+                                                  (iterations * vector_ops) / elapsed)
+                )
                 
             with log_lock:
                 thread_results.append(thread_result)
         
-        # Start timer
-        overall_start = get_time()
-        
         # Start all threads
+        threads = []
         for i in range(cpu_count):
             t = threading.Thread(target=thread_func, args=(i,))
             t.daemon = True
             threads.append(t)
             t.start()
         
-        # Wait for duration
-        time.sleep(duration)
-        
-        # Signal all threads to stop
-        stop_event.set()
-        
-        # Wait for all threads to finish
-        for t in threads:
-            t.join(timeout=2.0)  # Give threads 2 seconds to finish
+        # Run threads for duration and monitor progress
+        self.run_threads_for_duration(
+            threads, duration, stop_event, overall_start, 
+            progress_data, progress_lock, log_lock, "AVX"
+        )
         
         # Calculate overall statistics
-        overall_end = get_time()
-        overall_elapsed = overall_end - overall_start
+        overall_end = self._get_precise_time()
         
-        # Aggregate results
-        total_iterations = sum(r['iterations'] for r in thread_results)
-        total_ops = sum(r['total_ops'] for r in thread_results)
-        avg_ops_per_sec = total_ops / overall_elapsed
-        
-        # Prepare result
-        result = {
-            'thread_count': len(thread_results),
-            'total_iterations': total_iterations,
-            'elapsed_seconds': overall_elapsed,
-            'operations_per_second': avg_ops_per_sec,
-            'thread_results': thread_results,
-            'progress': progress_data  # Add progress data to result
-        }
-        
-        # Log results
-        log(f"\nMulti-threaded AVX test complete:")
-        log(f"  Threads: {len(thread_results)}")
-        log(f"  Total Vector Operations: {total_ops:,}")
-        log(f"  Time: {overall_elapsed:.2f} seconds")
-        log(f"  Overall Performance: {avg_ops_per_sec:,.2f} vector ops/sec")
-        log(f"  Per Thread Average: {avg_ops_per_sec/len(thread_results):,.2f} vector ops/sec")
-        log(f"  Progress data points: {len(progress_data)}")
-        
-        return result
+        # Use base class to finalize results
+        return self.finalize_multithreaded_result(
+            thread_results, overall_start, overall_end, progress_data, "AVX", "vector ops"
+        )

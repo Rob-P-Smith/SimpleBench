@@ -5,7 +5,7 @@ import random
 import math
 import ctypes
 import numpy as np
-from multiprocessing import cpu_count
+from src.benchmark.all_benchmark import AllBenchmark
 
 # Try to import SSE2 specific acceleration
 try:
@@ -15,7 +15,7 @@ try:
 except ImportError:
     NUMBA_AVAILABLE = False
 
-class SSEHeavyBenchmark:
+class SSEHeavyBenchmark(AllBenchmark):
     """SSE-Heavy benchmark that focuses on SSE2 vector operations similar to Prime95.
     
     This benchmark performs Pi calculation using SSE2 instructions and focuses
@@ -23,13 +23,13 @@ class SSEHeavyBenchmark:
     that fit within CPU cache (< 1024KB).
     """
     
-    def __init__(self, benchmark_controller):
+    def __init__(self, parent_benchmark):
         """Initialize the SSE-Heavy benchmark.
         
         Args:
-            benchmark_controller: The main benchmark controller that manages the benchmark process.
+            parent_benchmark: The main benchmark controller that manages the benchmark process.
         """
-        self.controller = benchmark_controller
+        super().__init__(parent_benchmark)
         self.running = False
         self.stop_flag = False
         
@@ -117,87 +117,8 @@ class SSEHeavyBenchmark:
         array_b = np.random.random(n_elements).astype(np.float32)
         
         return array_a, array_b
-        
-    def _worker_thread(self, thread_id, duration, result_dict, is_single_core=False):
-        """Worker thread that runs the SSE2 benchmark operations.
-        
-        Args:
-            thread_id: Identifier for this worker thread
-            duration: Duration to run the benchmark in seconds
-            result_dict: Dictionary to store results
-            is_single_core: Whether this is a single core benchmark
-        """
-        # Prepare data that fits in cache
-        arrays = self._prepare_benchmark_data()
-        
-        # Track iterations and timing
-        start_time = self.controller._get_precise_time()
-        end_time = start_time + duration
-        iterations = 0
-        pi_values = []
-        
-        # For periodic progress updates
-        last_update_time = start_time
-        update_interval = 0.4  # Update every 400ms
-        
-        # Initialize progress data collection for single core tests
-        progress_data = []
-        
-        # Run until the duration is reached
-        while self.controller._get_precise_time() < end_time and not self.stop_flag:
-            # First run: SSE vector operations on arrays
-            if NUMBA_AVAILABLE:
-                result = self.sse_vector_ops(arrays[0], arrays[1])
-            else:
-                result = self._fallback_sse_simulation(arrays)
-            
-            # Second run: Calculate Pi terms using BBP algorithm
-            # Use a smaller number of terms to ensure it fits in cache
-            pi_approx = self._bbp_pi_calculation(1000)
-            pi_values.append(pi_approx)
-            
-            # Count as one full iteration
-            iterations += 1
-            
-            # Update progress at regular intervals
-            current_time = self.controller._get_precise_time()
-            if is_single_core and (current_time - last_update_time) >= update_interval:
-                elapsed = current_time - start_time
-                
-                # Estimate operations per second
-                # Each iteration involves vector operations on arrays plus Pi calculation
-                vector_ops_per_iteration = 1000 * 4  # BBP with 1000 terms * operations per term
-                total_ops = iterations * vector_ops_per_iteration
-                ops_per_sec = total_ops / elapsed if elapsed > 0 else 0
-                
-                # Store progress data point for graphing
-                progress_data.append({
-                    'elapsed_seconds': elapsed,
-                    'operations_per_second': ops_per_sec
-                })
-                
-                # Format output to match light_benchmark style
-                physical_core_id = thread_id // 2  # Convert logical to physical core ID
-                if self.controller.progress_callback:
-                    self.controller.progress_callback(
-                        f"SSE int test, Core {physical_core_id}: {ops_per_sec:.2f} ops/sec (running for {elapsed:.2f}s)"
-                    )
-                
-                last_update_time = current_time
-        
-        # Record elapsed time and operations
-        actual_time = self.controller._get_precise_time() - start_time
-        
-        # Store results
-        result_dict[thread_id] = {
-            'iterations': iterations,
-            'time': actual_time,
-            'operations_per_second': iterations / actual_time if actual_time > 0 else 0,
-            'pi_approximation': np.mean(pi_values) if pi_values else 0,
-            'progress': progress_data if is_single_core else []  # Add progress data for graphing
-        }
-
-    def run_single_core_test(self, core_id, duration):
+    
+    def run_single_core_test(self, core_id, duration=10):
         """Run the SSE-Heavy benchmark on a single core.
         
         Args:
@@ -207,50 +128,68 @@ class SSEHeavyBenchmark:
         Returns:
             dict: Benchmark results
         """
-        # Set up result storage
-        result_dict = {}
-        self.stop_flag = False
+        # Use base class to prepare for test
+        physical_core_id, progress_data, start_time = self.prepare_single_core_test(core_id, "SSE-Heavy load")
         
-        # Log benchmark start
-        physical_core_id = core_id // 2  # Convert logical to physical core ID
-        self.controller._log(f"Starting SSE-Heavy benchmark on Core {physical_core_id} for {duration} seconds")
+        # Prepare benchmark data
+        arrays = self._prepare_benchmark_data()
         
-        try:
-            # Run the worker thread
-            self._worker_thread(core_id, duration, result_dict, is_single_core=True)
-            
-            # Extract results
-            if core_id in result_dict:
-                thread_result = result_dict[core_id]
-                
-                # Format results
-                return {
-                    'operations_per_second': thread_result['operations_per_second'],
-                    'iterations': thread_result['iterations'],
-                    'elapsed_seconds': thread_result['time'],
-                    'pi_approximation': thread_result['pi_approximation'],
-                    'progress': thread_result['progress']  # Include progress data in the result
-                }
+        # Prepare for iterations
+        iterations = 0
+        vector_ops_per_iteration = 1000 * 4  # BBP with 1000 terms * operations per term
+        end_time = start_time + duration
+        current_time = start_time
+        pi_values = []
+        
+        # For periodic progress updates
+        last_update_time = start_time
+        update_interval = 0.4  # Update every 0.4 seconds
+        
+        # Run the benchmark
+        while current_time < end_time and not self.parent._stop_event.is_set():
+            # First run: SSE vector operations on arrays
+            if NUMBA_AVAILABLE:
+                result = self.sse_vector_ops(arrays[0], arrays[1])
             else:
-                return {
-                    'operations_per_second': 0,
-                    'iterations': 0,
-                    'elapsed_seconds': duration,
-                    'error': 'No results collected',
-                    'progress': []
-                }
-                
-        except Exception as e:
-            self.controller._log(f"Error in SSE-Heavy benchmark on Core {physical_core_id}: {str(e)}")
-            return {
-                'operations_per_second': 0,
-                'iterations': 0,
-                'elapsed_seconds': duration,
-                'error': str(e),
-                'progress': []
-            }
+                result = self._fallback_sse_simulation(arrays)
+            
+            # Second run: Calculate Pi terms using BBP algorithm
+            pi_approx = self._bbp_pi_calculation(1000)
+            pi_values.append(pi_approx)
+            
+            iterations += 1
+            
+            # Update time and check if it's time to log progress
+            current_time = self._get_precise_time()
+            if current_time - last_update_time >= update_interval:
+                elapsed = current_time - start_time
+                if elapsed > 0:
+                    ops_per_sec = (iterations * vector_ops_per_iteration) / elapsed
+                    
+                    # Use standardized logging
+                    self.log_test_progress(core_id, "SSE int", ops_per_sec, elapsed)
+                    
+                    # Store progress data point
+                    self.collect_progress_data(progress_data, elapsed, ops_per_sec)
+                    
+                    # Update the last update time
+                    last_update_time = current_time
+                    
+                    # Check time after measurement
+                    current_time = self._get_precise_time()
+        
+        # Calculate result stats
+        result = self.finalize_single_core_result(
+            core_id, start_time, iterations, vector_ops_per_iteration, 
+            progress_data, "SSE", "vector ops"
+        )
+        
+        # Add additional SSE-specific metrics
+        result['pi_approximation'] = np.mean(pi_values) if pi_values else 0
+        
+        return result
     
-    def run_multithreaded_test(self, duration):
+    def run_multithreaded_test(self, duration=10):
         """Run the SSE-Heavy benchmark using all available cores.
         
         Args:
@@ -259,101 +198,126 @@ class SSEHeavyBenchmark:
         Returns:
             dict: Benchmark results
         """
-        # Set up result storage and state
-        result_dict = {}
-        self.stop_flag = False
+        # Set up multithreaded test using base class
+        thread_results, progress_data, stop_event, log_lock, progress_lock, overall_start = \
+            self.setup_multithreaded_test("SSE")
         
-        # Get the number of threads to use (all logical processors)
-        thread_count = psutil.cpu_count(logical=True)
+        # Get CPU count from parent
+        cpu_count = self.parent.cpu_count
         
-        # Create and start worker threads
-        threads = []
-        start_time = self.controller._get_precise_time()
-        
-        self.controller._log(f"Starting SSE-Heavy multi-threaded benchmark using {thread_count} threads")
-        
-        # For periodic progress updates
-        last_update_time = start_time
-        update_interval = 0.4  # Update every 400ms
-        
-        # Initialize progress data for multi-threaded test
-        progress_data = []
-        
-        try:
-            # Start a worker thread for each logical core
-            for i in range(thread_count):
-                thread = threading.Thread(
-                    target=self._worker_thread,
-                    args=(i, duration, result_dict, False)
-                )
-                thread.daemon = True
-                thread.start()
-                threads.append(thread)
+        # Function that will run in each thread
+        def thread_func(thread_id):
+            # Set thread priority to highest available
+            try:
+                if self.parent.sys_platform == 'win32':
+                    import win32api
+                    import win32con
+                    thread_handle = win32api.GetCurrentThread()
+                    win32api.SetThreadPriority(thread_handle, win32con.THREAD_PRIORITY_TIME_CRITICAL)
+            except Exception:
+                pass  # Silently continue if we can't set thread priority
             
-            # Monitor progress while threads are running
-            remaining_threads = len(threads)
-            while remaining_threads > 0:
-                remaining_threads = sum(1 for t in threads if t.is_alive())
+            # Prepare benchmark data
+            arrays = self._prepare_benchmark_data()
+            
+            # Each iteration involves intensive computations
+            vector_ops_per_iteration = 1000 * 4  # BBP with 1000 terms * operations per term
+            
+            # Initialize counters
+            start_time = self._get_precise_time()
+            iterations = 0
+            pi_values = []
+            thread_result = {'thread_id': thread_id, 'iterations': 0}
+            
+            # For periodic progress updates
+            last_update_time = start_time
+            update_interval = 0.4  # Update every 0.4 seconds
+            
+            # Run the benchmark
+            while not stop_event.is_set():
+                # First run: SSE vector operations on arrays
+                if NUMBA_AVAILABLE:
+                    result = self.sse_vector_ops(arrays[0], arrays[1])
+                else:
+                    result = self._fallback_sse_simulation(arrays)
+                
+                # Second run: Calculate Pi terms using BBP algorithm
+                pi_approx = self._bbp_pi_calculation(1000)
+                pi_values.append(pi_approx)
+                
+                iterations += 1
                 
                 # Update progress at regular intervals
-                current_time = self.controller._get_precise_time()
+                current_time = self._get_precise_time()
                 if current_time - last_update_time >= update_interval:
                     elapsed = current_time - start_time
-                    percent_complete = min(100, (elapsed / duration) * 100)
-                    
-                    # Calculate current performance estimate
-                    current_ops = 0
-                    for thread_id, result in result_dict.items():
-                        if 'operations_per_second' in result:
-                            current_ops += result['operations_per_second']
-                    
-                    # Add progress data point
-                    progress_data.append({
-                        'elapsed_seconds': elapsed,
-                        'operations_per_second': current_ops
-                    })
-                    
-                    # Show progress message
-                    self.controller._log(f"MT SSE test: {percent_complete:.1f}% complete, {remaining_threads} threads active")
-                    last_update_time = current_time
-                
-                # Short sleep to avoid busy waiting
-                time.sleep(0.1)
+                    if elapsed > 0:
+                        ops_per_sec = (iterations * vector_ops_per_iteration) / elapsed
+                        
+                        with log_lock:
+                            # Use standardized logging
+                            self.log_test_progress(thread_id, "SSE", ops_per_sec, elapsed, is_thread=True)
+                        
+                        # Record progress data point with overall elapsed time
+                        with progress_lock:
+                            elapsed_since_start = current_time - overall_start
+                            progress_data.append(
+                                self.create_thread_progress_data(thread_id, elapsed_since_start, ops_per_sec)
+                            )
+                        
+                        # Update the last update time
+                        last_update_time = current_time
             
-            # Wait for all threads to finish
-            for thread in threads:
-                thread.join()
+            # Record final statistics
+            end_time = self._get_precise_time()
+            elapsed = end_time - start_time
             
-            # Calculate overall results
-            total_operations = sum(result['iterations'] for result in result_dict.values())
-            actual_duration = self.controller._get_precise_time() - start_time
-            operations_per_second = total_operations / actual_duration if actual_duration > 0 else 0
+            thread_result['iterations'] = iterations
+            thread_result['elapsed_seconds'] = elapsed
+            thread_result['ops_per_iteration'] = vector_ops_per_iteration
+            thread_result['total_ops'] = iterations * vector_ops_per_iteration
+            thread_result['operations_per_second'] = (iterations * vector_ops_per_iteration) / elapsed
+            thread_result['pi_approximation'] = np.mean(pi_values) if pi_values else 0
             
-            # Average Pi approximation across all threads
-            pi_values = [result['pi_approximation'] for result in result_dict.values() if 'pi_approximation' in result]
-            avg_pi = sum(pi_values) / len(pi_values) if pi_values else 0
+            # Record final data point
+            with progress_lock:
+                elapsed_since_start = end_time - overall_start
+                progress_data.append(
+                    self.create_thread_progress_data(thread_id, elapsed_since_start, 
+                                                  (iterations * vector_ops_per_iteration) / elapsed)
+                )
             
-            # Return the combined results
-            return {
-                'thread_count': thread_count,
-                'thread_results': list(result_dict.values()),
-                'total_operations': total_operations,
-                'operations_per_second': operations_per_second,
-                'elapsed_seconds': actual_duration,
-                'average_pi_approximation': avg_pi,
-                'progress': progress_data  # Include progress data
-            }
-            
-        except Exception as e:
-            self.controller._log(f"Error in SSE-Heavy multi-threaded benchmark: {str(e)}")
-            return {
-                'thread_count': thread_count,
-                'operations_per_second': 0,
-                'elapsed_seconds': duration,
-                'error': str(e),
-                'progress': []
-            }
-    
+            with log_lock:
+                thread_results.append(thread_result)
+        
+        # Start all threads
+        threads = []
+        for i in range(cpu_count):
+            t = threading.Thread(target=thread_func, args=(i,))
+            t.daemon = True
+            threads.append(t)
+            t.start()
+        
+        # Run threads for duration and monitor progress
+        self.run_threads_for_duration(
+            threads, duration, stop_event, overall_start, 
+            progress_data, progress_lock, log_lock, "SSE"
+        )
+        
+        # Calculate overall statistics
+        overall_end = self._get_precise_time()
+        
+        # Use base class to finalize results
+        result = self.finalize_multithreaded_result(
+            thread_results, overall_start, overall_end, progress_data, "SSE", "vector ops"
+        )
+        
+        # Calculate and add Pi approximation average
+        pi_values = [r.get('pi_approximation', 0) for r in thread_results]
+        result['average_pi_approximation'] = sum(pi_values) / len(pi_values) if pi_values else 0
+        
+        return result
+        
     def stop(self):
         """Stop the benchmark."""
         self.stop_flag = True
